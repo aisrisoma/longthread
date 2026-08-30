@@ -263,6 +263,11 @@ footer .wrap{display:flex; justify-content:space-between; gap:20px; flex-wrap:wr
         </div>
       </div>
 
+      <p class="privacy" id="licenceBanner" hidden style="border:1px solid var(--a)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--a)"><path d="M20 6L9 17l-5-5"/></svg>
+        <span><b>Your licence is active.</b> Drop your chat in below and the print file is ready straight away — there's no key to paste and nothing else to pay.</span>
+      </p>
+
       <p class="privacy">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
         <span>Your chat is read inside this browser tab and never leaves it. There is nothing to upload it to — Longthread is a single page with no server and no database behind it. Close the tab and every trace is gone.</span>
@@ -1371,7 +1376,20 @@ const state = {
   nameA: '', nameB: '',
   unlocked: false,
   isDemo: false,
+  licence: '',        // a licence key already verified this visit or a previous one
 };
+
+/* A licence outlives the poster. Someone can buy from the Gumroad page before
+   they have made anything, so the key is remembered and applied to whatever
+   poster they make next — including after a reload or a fresh visit. Only the
+   key is stored; the chat never is. */
+const KEY_STORE = 'lt-licence';
+const readStoredKey = () => { try { return localStorage.getItem(KEY_STORE) || ''; } catch { return ''; } };
+const storeKey = (k) => { try { localStorage.setItem(KEY_STORE, k); } catch { /* private mode */ } };
+function keyFromUrl() {
+  const m = /[?&#](?:key|licence|license)=([^&#]+)/i.exec(window.location.href);
+  return m ? decodeURIComponent(m[1]).trim() : '';
+}
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1411,6 +1429,10 @@ function refresh() {
   $('#summary').innerHTML = summaryHTML(state.analysis);
   $('#lockNote').hidden = state.unlocked;
   $('#unlockedNote').hidden = !state.unlocked;
+  $('#buyRow').hidden = state.unlocked;
+  $('#downloadBtn').textContent = state.unlocked
+    ? 'Download print file · 2480 × 3508'
+    : 'Download watermarked preview';
 }
 
 /* ------------------------------------------------------------------ upload */
@@ -1442,7 +1464,7 @@ async function handleText(text, { isDemo = false } = {}) {
 
   state.analysis = a;
   state.isDemo = isDemo;
-  state.unlocked = false;
+  state.unlocked = !!state.licence;
   state.nameA = a.people[0].name;
   state.nameB = a.people[1].name;
 
@@ -1651,11 +1673,12 @@ function init() {
     $('#keyBtn').disabled = false;
     $('#keyBtn').textContent = 'Unlock';
     if (r.ok) {
+      state.licence = key.trim();
+      storeKey(state.licence);
       state.unlocked = true;
       note.hidden = true;
       $('#keyRow').hidden = true;
-      $('#buyRow').hidden = true;
-      $('#downloadBtn').textContent = 'Download print file · 2480 × 3508';
+      $('#licenceBanner').hidden = false;
       refresh();
     } else {
       note.textContent = r.message;
@@ -1699,11 +1722,35 @@ function init() {
     return { w: c.width, h: c.height, bytes: blob ? blob.size : 0, mid: [...mid].slice(0, 3) };
   };
 
+  restoreLicence();
+
   // sample poster on the landing page
   drawSample();
 
   setStage('idle');
   if (CONFIG.price) $$('.price').forEach((el) => { el.textContent = CONFIG.price; });
+}
+
+/* Runs on load. A key arriving in the URL is how someone returns from Gumroad
+   after buying without having made a poster yet. */
+async function restoreLicence() {
+  const fromUrl = keyFromUrl();
+  const key = fromUrl || readStoredKey();
+  if (!key) return;
+  const r = await verifyKey(key);
+  if (!r.ok) return;
+
+  state.licence = key;
+  storeKey(key);
+  $('#licenceBanner').hidden = false;
+  if (fromUrl) {
+    // keep the key out of the address bar and out of any shared link
+    try { history.replaceState(null, '', window.location.pathname); } catch { /* ignore */ }
+  }
+  if (state.analysis) {
+    state.unlocked = true;
+    refresh();
+  }
 }
 
 async function drawSample() {
