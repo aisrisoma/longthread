@@ -181,9 +181,13 @@ section.band{padding:76px 0; border-top:1px solid var(--line)}
 .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:26px}
 .card h3{font-size:22px; margin-bottom:14px}
 .card ol{margin:0; padding-left:0; list-style:none; counter-reset:s; display:flex; flex-direction:column; gap:11px}
-.card ol li{counter-increment:s; display:flex; gap:12px; font-size:15.5px; color:var(--muted)}
+.card ol li{
+  counter-increment:s; position:relative; padding-left:34px;
+  font-size:15.5px; color:var(--muted); line-height:1.55;
+}
 .card ol li::before{
-  content:counter(s); flex:none; width:22px; height:22px; border-radius:50%;
+  content:counter(s); position:absolute; left:0; top:2px;
+  width:22px; height:22px; border-radius:50%;
   background:var(--sunk); color:var(--ink); font:500 11px/22px var(--f-mono); text-align:center;
 }
 .card ol li b{color:var(--ink); font-weight:600}
