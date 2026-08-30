@@ -1,0 +1,11 @@
+{
+  // The name MUST stay "longthreadd" — it is what tells Cloudflare to update
+  // the existing Worker instead of creating another one.
+  "name": "longthreadd",
+  "compatibility_date": "2026-08-30",
+  "assets": {
+    "directory": "./public",
+    // One-page site: serve index.html for any path rather than a 404.
+    "not_found_handling": "single-page-application"
+  }
+}
