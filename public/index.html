@@ -1,0 +1,1724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Longthread</title>
+<meta name="description" content="Turn a WhatsApp chat export into a print-ready poster of your conversation. Read entirely in your own browser — nothing is ever uploaded.">
+<meta property="og:title" content="Longthread">
+<meta property="og:description" content="Your longest conversation, printed. Nothing leaves your browser.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='11' cy='16' r='6' fill='%23C18421'/%3E%3Ccircle cx='21' cy='16' r='6' fill='%23259CB5'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Karla:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* ---------------------------------------------------------------- tokens */
+:root{
+  --ground:#FAF9F6; --surface:#FFFFFF; --sunk:#F1EFE9;
+  --ink:#14181D; --muted:#616974; --faint:#8C929B; --line:#E2DFD8;
+  --a:#A96C15; --b:#136A83;
+  --shadow:0 1px 2px rgba(20,24,29,.05), 0 12px 32px -12px rgba(20,24,29,.16);
+  --f-display:"Instrument Serif","Iowan Old Style",Georgia,serif;
+  --f-body:"Karla",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --r:14px; --wrap:1080px;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --ground:#0E141B; --surface:#151E27; --sunk:#101821;
+    --ink:#EDF1F5; --muted:#8B98A7; --faint:#6C7B8B; --line:#22303E;
+    --a:#D89B3E; --b:#45B4CE;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 40px -14px rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E141B; --surface:#151E27; --sunk:#101821;
+  --ink:#EDF1F5; --muted:#8B98A7; --faint:#6C7B8B; --line:#22303E;
+  --a:#D89B3E; --b:#45B4CE;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 16px 40px -14px rgba(0,0,0,.6);
+}
+
+/* ------------------------------------------------------------------ base */
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font:400 17px/1.62 var(--f-body);
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:var(--f-display); font-weight:400; text-wrap:balance; margin:0}
+p{margin:0}
+a{color:inherit}
+button,input{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--a); outline-offset:3px; border-radius:4px}
+canvas{display:block; max-width:100%; height:auto}
+[hidden]{display:none !important}
+
+.wrap{width:100%; max-width:var(--wrap); margin-inline:auto; padding-inline:24px}
+.eyebrow{
+  font:500 11px/1.4 var(--f-mono); letter-spacing:.16em; text-transform:uppercase;
+  color:var(--faint); margin:0;
+}
+.lede{color:var(--muted); font-size:19px; max-width:60ch}
+
+/* ------------------------------------------------------------------- bar */
+.bar{
+  position:sticky; top:0; z-index:20; background:color-mix(in srgb,var(--ground) 88%,transparent);
+  backdrop-filter:blur(10px); border-bottom:1px solid var(--line);
+}
+.bar .wrap{display:flex; align-items:center; gap:20px; height:60px}
+.mark{
+  display:flex; align-items:center; gap:9px; font:500 15px/1 var(--f-mono);
+  letter-spacing:.04em; text-decoration:none; margin-right:auto;
+}
+.dots{display:inline-flex; gap:3px}
+.dots i{width:8px; height:8px; border-radius:50%; display:block}
+.dots i:first-child{background:var(--a)} .dots i:last-child{background:var(--b)}
+.bar nav{display:flex; gap:22px; align-items:center}
+.bar nav a{
+  font:500 13px/1 var(--f-mono); letter-spacing:.05em; text-transform:uppercase;
+  color:var(--muted); text-decoration:none;
+}
+.bar nav a:hover{color:var(--ink)}
+.tog{
+  background:none; border:1px solid var(--line); border-radius:999px;
+  width:34px; height:34px; cursor:pointer; display:grid; place-items:center; color:var(--muted);
+}
+.tog:hover{color:var(--ink); border-color:var(--muted)}
+@media (max-width:720px){ .bar nav a{display:none} }
+
+/* ------------------------------------------------------------------ hero */
+.hero{padding:76px 0 40px}
+.hero h1{font-size:clamp(44px,7.4vw,78px); line-height:1.02; margin:18px 0 20px; letter-spacing:-.015em}
+.hero h1 em{font-style:italic; color:var(--a)}
+
+.drop{
+  margin-top:34px; border:1.5px dashed var(--line); border-radius:var(--r);
+  background:var(--surface); padding:44px 28px; text-align:center;
+  transition:border-color .15s, background .15s;
+}
+.drop.over{border-color:var(--a); background:var(--sunk)}
+.drop h2{font-size:27px; margin-bottom:6px}
+.drop p{color:var(--muted); font-size:15px}
+.btn{
+  border:none; border-radius:10px; padding:13px 22px; cursor:pointer;
+  font:600 15px/1 var(--f-body); letter-spacing:.01em;
+  background:var(--ink); color:var(--ground); transition:opacity .15s, transform .06s;
+}
+.btn:hover{opacity:.88}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.5; cursor:default}
+.btn.ghost{background:none; border:1px solid var(--line); color:var(--ink)}
+.btn.ghost:hover{border-color:var(--muted); opacity:1}
+.btn.accent{background:var(--a); color:#fff}
+:root[data-theme="dark"] .btn.accent{color:#14181D}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.accent{color:#14181D}}
+.btnrow{display:flex; gap:10px; flex-wrap:wrap; justify-content:center; margin-top:20px}
+
+.privacy{
+  margin-top:20px; padding:14px 16px; border-radius:10px; background:var(--sunk);
+  color:var(--muted); font-size:14.5px; display:flex; gap:11px; align-items:flex-start;
+}
+.privacy svg{flex:none; margin-top:2px; color:var(--b)}
+
+.spin{width:26px;height:26px;border:2.5px solid var(--line);border-top-color:var(--a);border-radius:50%;
+  animation:sp .7s linear infinite; margin:0 auto 14px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:2.4s}}
+.pad{padding:54px 28px; text-align:center; border:1px solid var(--line); border-radius:var(--r);
+  background:var(--surface); margin-top:34px}
+.pad p{color:var(--muted); max-width:52ch; margin:0 auto}
+
+/* ---------------------------------------------------------------- result */
+.result{padding:20px 0 40px}
+.rgrid{display:grid; grid-template-columns:minmax(0,1fr) 330px; gap:36px; align-items:start}
+@media (max-width:900px){ .rgrid{grid-template-columns:1fr} }
+.posterwrap{background:var(--sunk); border-radius:var(--r); padding:22px; display:grid; place-items:center}
+.posterwrap canvas{box-shadow:var(--shadow); border-radius:3px; width:100%; max-width:560px}
+.panel{display:flex; flex-direction:column; gap:26px; position:sticky; top:84px}
+@media (max-width:900px){ .panel{position:static} }
+.field{display:flex; flex-direction:column; gap:7px}
+.field label{font:500 11px/1 var(--f-mono); letter-spacing:.14em; text-transform:uppercase; color:var(--faint)}
+.field input{
+  border:1px solid var(--line); background:var(--surface); border-radius:9px;
+  padding:11px 13px; font-size:15px; width:100%;
+}
+.field input:focus{border-color:var(--a); outline:none}
+.two{display:grid; grid-template-columns:1fr 1fr; gap:12px}
+
+#themes,#sampleThemes{display:flex; gap:8px; flex-wrap:wrap}
+.swatch{
+  display:flex; align-items:center; gap:8px; cursor:pointer;
+  border:1px solid var(--line); background:var(--surface); border-radius:999px;
+  padding:7px 14px 7px 8px; font:500 13px/1 var(--f-body); color:var(--muted);
+}
+.swatch:hover{border-color:var(--muted)}
+.swatch.on{border-color:var(--ink); color:var(--ink)}
+.chip{width:26px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;gap:2px;border:1px solid rgba(128,128,128,.28)}
+.chip i{width:5px;height:5px;border-radius:50%;display:block}
+
+.srow{display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:1px solid var(--line); font-size:14.5px}
+.srow dt{color:var(--muted)} .srow dd{margin:0; font-variant-numeric:tabular-nums; text-align:right}
+dl{margin:0}
+.note{font-size:14px; color:var(--muted); margin-top:10px}
+.note.warn{color:var(--a)}
+.stack{display:flex; flex-direction:column; gap:10px}
+.keyrow{display:flex; gap:8px}
+.keyrow input{flex:1; min-width:0}
+
+/* ------------------------------------------------------------- sections */
+section.band{padding:76px 0; border-top:1px solid var(--line)}
+.head{max-width:62ch; margin-bottom:34px}
+.head h2{font-size:clamp(30px,4.2vw,42px); line-height:1.1; margin:14px 0 12px}
+.head p{color:var(--muted)}
+
+.sampleGrid{display:grid; grid-template-columns:1fr 300px; gap:44px; align-items:center}
+@media (max-width:900px){ .sampleGrid{grid-template-columns:1fr} }
+.sampleGrid canvas{box-shadow:var(--shadow); border-radius:3px}
+
+.steps{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:28px}
+@media (max-width:760px){ .steps{grid-template-columns:1fr} }
+.card{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:26px}
+.card h3{font-size:22px; margin-bottom:14px}
+.card ol{margin:0; padding-left:0; list-style:none; counter-reset:s; display:flex; flex-direction:column; gap:11px}
+.card ol li{counter-increment:s; display:flex; gap:12px; font-size:15.5px; color:var(--muted)}
+.card ol li::before{
+  content:counter(s); flex:none; width:22px; height:22px; border-radius:50%;
+  background:var(--sunk); color:var(--ink); font:500 11px/22px var(--f-mono); text-align:center;
+}
+.card ol li b{color:var(--ink); font-weight:600}
+
+.getGrid{display:grid; grid-template-columns:1.15fr 1fr; gap:44px; align-items:start}
+@media (max-width:820px){ .getGrid{grid-template-columns:1fr} }
+.feat{display:flex; flex-direction:column; gap:2px; padding:16px 0; border-bottom:1px solid var(--line)}
+.feat b{font-weight:600; font-size:16px}
+.feat span{color:var(--muted); font-size:14.5px}
+.pricebox{background:var(--surface); border:1px solid var(--line); border-radius:var(--r); padding:30px; box-shadow:var(--shadow)}
+.pricebox .amount{font-family:var(--f-display); font-size:62px; line-height:1; color:var(--ink)}
+.pricebox .once{font:500 11px/1 var(--f-mono); letter-spacing:.14em; text-transform:uppercase; color:var(--faint); margin-top:10px}
+.pricebox ul{list-style:none; margin:22px 0; padding:0; display:flex; flex-direction:column; gap:9px}
+.pricebox li{display:flex; gap:10px; font-size:15px; color:var(--muted)}
+.pricebox li::before{content:""; flex:none; width:6px; height:6px; border-radius:50%; background:var(--b); margin-top:8px}
+
+details{border-bottom:1px solid var(--line); padding:18px 0}
+summary{cursor:pointer; font-weight:600; font-size:17px; list-style:none; display:flex; justify-content:space-between; gap:16px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:"+"; color:var(--faint); font-family:var(--f-mono)}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted); font-size:15.5px; margin-top:11px; max-width:68ch}
+
+footer{border-top:1px solid var(--line); padding:40px 0 60px; color:var(--faint); font-size:14px}
+footer .wrap{display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap}
+</style>
+</head>
+<body>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="#top"><span class="dots"><i></i><i></i></span>longthread</a>
+    <nav>
+      <a href="#how">How it works</a>
+      <a href="#get">What you get</a>
+      <a href="#faq">Questions</a>
+    </nav>
+    <button class="tog" id="themeToggle" title="Switch light or dark" aria-label="Switch light or dark">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow">A poster made from your own chat export</p>
+      <h1>Your longest conversation, <em>printed.</em></h1>
+      <p class="lede">Drop in a WhatsApp export and Longthread prints the conversation itself — every message, set small enough that four years of talking fits on a single sheet — then finds the moments buried in it: how it started, the longest silence and who broke it, the latest you ever stayed up.</p>
+
+      <div class="drop" id="drop" data-stage="idle">
+        <h2>Drop your chat export here</h2>
+        <p>A <b>.txt</b> file from Android, or the <b>.zip</b> from an iPhone.</p>
+        <div class="btnrow">
+          <button class="btn" id="pick" type="button">Choose a file</button>
+          <button class="btn ghost try-demo" type="button">See it with a sample chat</button>
+        </div>
+        <input type="file" id="file" accept=".txt,.zip,text/plain,application/zip" hidden>
+      </div>
+
+      <div class="pad" data-stage="working" hidden>
+        <div class="spin"></div>
+        <p>Reading your conversation. Larger chats take a few seconds.</p>
+      </div>
+
+      <div class="pad" data-stage="error" hidden>
+        <h2 style="font-size:24px;margin-bottom:10px">That didn't work</h2>
+        <p id="errorText"></p>
+        <div class="btnrow">
+          <button class="btn retry" type="button">Try another file</button>
+          <button class="btn ghost try-demo" type="button">See the sample instead</button>
+        </div>
+      </div>
+
+      <p class="privacy">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <span>Your chat is read inside this browser tab and never leaves it. There is nothing to upload it to — Longthread is a single page with no server and no database behind it. Close the tab and every trace is gone.</span>
+      </p>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ result -->
+  <section class="result" id="result" hidden>
+    <div class="wrap">
+      <div class="rgrid">
+        <div class="posterwrap"><canvas id="poster" aria-label="Your poster"></canvas></div>
+
+        <div class="panel">
+          <div class="stack">
+            <p class="eyebrow">Your poster</p>
+            <p class="note" id="groupNote" hidden></p>
+            <p class="note" id="lockNote">The preview is watermarked. Unlocking removes it and renders the file at print resolution.</p>
+            <p class="note" id="unlockedNote" hidden>Unlocked. The download is now 2480 × 3508 — A4 at 300 dpi, and still sharp printed at A3.</p>
+          </div>
+
+          <div class="stack">
+            <p class="eyebrow">Finish</p>
+            <div id="themes"></div>
+          </div>
+
+          <div class="two">
+            <div class="field"><label for="nameA">First name</label><input id="nameA" maxlength="28"></div>
+            <div class="field"><label for="nameB">Second name</label><input id="nameB" maxlength="28"></div>
+          </div>
+
+          <div class="stack">
+            <button class="btn" id="downloadBtn" type="button">Download watermarked preview</button>
+            <p class="note" id="downloadNote" hidden></p>
+            <div id="buyRow" class="stack">
+              <button class="btn accent" id="buyBtn" type="button">Unlock the print file · <span class="price">$19</span></button>
+              <div class="keyrow" id="keyRow" hidden>
+                <input id="key" placeholder="Paste your licence key" autocomplete="off">
+                <button class="btn ghost" id="keyBtn" type="button">Unlock</button>
+              </div>
+              <p class="note warn" id="keyNote" hidden></p>
+            </div>
+          </div>
+
+          <div class="stack">
+            <p class="eyebrow">What it found</p>
+            <dl id="summary"></dl>
+          </div>
+
+          <button class="btn ghost" id="startOver" type="button">Start again with another chat</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------ sample -->
+  <section class="band">
+    <div class="wrap">
+      <div class="sampleGrid">
+        <div><canvas id="sample" aria-label="Example poster"></canvas></div>
+        <div>
+          <p class="eyebrow">What is actually on it</p>
+          <h2 style="font-size:34px;line-height:1.12;margin:14px 0 14px">From across the room it's a texture. Up close it's every word you said.</h2>
+          <p class="lede" style="font-size:16.5px">The body of the poster is the conversation, one message per line, in each of your two colours — printed at three point, which is small enough to fit and just big enough to read with your nose against the paper. Underneath sit four things you actually said, found by counting: the first message, the message that ended the longest silence, the latest either of you was ever awake, and the phrase one of you can't stop using.</p>
+          <p class="note" style="margin-top:18px">This example is built from an invented chat, so nobody's real messages are on display.</p>
+          <div id="sampleThemes" style="margin-top:20px">
+            <button class="swatch on" data-theme="nightfall" type="button"><span class="chip" style="background:#0E141B"><i style="background:#C18421"></i><i style="background:#259CB5"></i></span>Nightfall</button>
+            <button class="swatch" data-theme="ember" type="button"><span class="chip" style="background:#141110"><i style="background:#F1383E"></i><i style="background:#28A897"></i></span>Ember</button>
+            <button class="swatch" data-theme="archive" type="button"><span class="chip" style="background:#F2F1EE"><i style="background:#125EC3"></i><i style="background:#C94D19"></i></span>Archive</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- how-to -->
+  <section class="band" id="how">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Getting the file</p>
+        <h2>Exporting a chat takes about twenty seconds.</h2>
+        <p>WhatsApp has this built in. Choose <b>Without media</b> — the poster is made from the words, and the file stays small.</p>
+      </div>
+      <div class="steps">
+        <div class="card">
+          <h3>On iPhone</h3>
+          <ol>
+            <li>Open the chat, then tap the <b>contact's name</b> at the top.</li>
+            <li>Scroll down and tap <b>Export Chat</b>.</li>
+            <li>Choose <b>Without Media</b>.</li>
+            <li>Tap <b>Save to Files</b>, then drop that <b>.zip</b> here.</li>
+          </ol>
+        </div>
+        <div class="card">
+          <h3>On Android</h3>
+          <ol>
+            <li>Open the chat and tap the <b>⋮</b> menu, top right.</li>
+            <li>Tap <b>More</b>, then <b>Export chat</b>.</li>
+            <li>Choose <b>Without media</b>.</li>
+            <li>Save it, then drop that <b>.txt</b> here.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- --------------------------------------------------------- what you get -->
+  <section class="band" id="get">
+    <div class="wrap">
+      <div class="getGrid">
+        <div>
+          <div class="head" style="margin-bottom:8px">
+            <p class="eyebrow">What arrives</p>
+            <h2>One file, yours to keep.</h2>
+          </div>
+          <div class="feat"><b>2480 × 3508 pixels</b><span>A4 at 300 dpi. Prints sharp at A3 too, and any print shop will take it.</span></div>
+          <div class="feat"><b>Nothing invented</b><span>Every quote on the poster is a real message, found by counting — never written or paraphrased by a machine.</span></div>
+          <div class="feat"><b>Three finishes</b><span>Two dark, one light. Archive uses far less ink if you're printing at home.</span></div>
+          <div class="feat"><b>Your names, spelled your way</b><span>Change what WhatsApp saved them as — nicknames included.</span></div>
+          <div class="feat"><b>No watermark, no expiry</b><span>Print it once or print it ten times. There is no account and nothing to renew.</span></div>
+        </div>
+        <div class="pricebox">
+          <div class="amount price">$19</div>
+          <div class="once">One poster · one payment</div>
+          <ul>
+            <li>Free to make and preview — you only pay for the print file</li>
+            <li>Checkout handled by Gumroad; card and PayPal accepted</li>
+            <li>Not happy with it? Reply to your receipt and it's refunded</li>
+          </ul>
+          <button class="btn accent try-demo" type="button" style="width:100%">See a sample poster first</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- -------------------------------------------------------------- faq -->
+  <section class="band" id="faq">
+    <div class="wrap">
+      <div class="head">
+        <p class="eyebrow">Questions</p>
+        <h2>The ones worth answering.</h2>
+      </div>
+
+      <details open><summary>Is my conversation really private?</summary>
+        <p>Yes, and not as a promise — as a fact about how the page is built. Longthread is one static page. The reading, the counting and the drawing all happen in JavaScript inside your own browser. There is no server that receives chats, because there is no server at all. You can confirm it: open your browser's network panel before you drop the file and watch that nothing is sent.</p>
+      </details>
+
+      <details><summary>What about group chats?</summary>
+        <p>They work, but the poster is built for two. It picks whoever wrote the most messages and whoever wrote the second most, draws those two, and tells you it has done so. A poster of eleven people is a different design, and this isn't it.</p>
+      </details>
+
+      <details><summary>Does it handle other languages and emoji?</summary>
+        <p>Yes. Message counts, timings, dates and emoji are correct in any language and any script. One caveat worth knowing before you buy: the "most-used words" line filters out common filler words in English and romanised Hindi only, so in other languages that line will show ordinary words like "the" and "and" rather than anything characteristic. Everything else on the poster is unaffected.</p>
+      </details>
+
+      <details><summary>Which exports does it read?</summary>
+        <p>WhatsApp exports from iPhone and Android, in any date format the app produces — day-first, month-first, 12-hour, 24-hour, dotted or slashed. It works out which one your file uses. It does not currently read exports from Telegram, iMessage or Signal.</p>
+      </details>
+
+      <details><summary>How big a chat can it handle?</summary>
+        <p>Tested to 250,000 messages, which parse in about two seconds. Very large exports on an older phone may run out of memory — if that happens, try it on a computer.</p>
+      </details>
+
+      <details><summary>Does it really print every single message?</summary>
+        <p>If they fit, yes — and the caption on the poster says so. About 600 lines fit at a size that stays readable on paper, so a chat shorter than that is printed in full. Above it, the poster takes an even spread across the whole span and tells you exactly what it did: <i>&ldquo;600 of the 40,000 things you said — one in every 67&rdquo;</i>. Printing 40,000 messages on A4 would mean type nobody could read, and claiming otherwise would be a lie you'd notice the moment it arrived.</p>
+      </details>
+
+      <details><summary>Can I get a refund?</summary>
+        <p>Yes. Reply to the Gumroad receipt and say so. You made and saw the poster before paying, so this should be rare — but if the file isn't what you expected, you get your money back.</p>
+      </details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Longthread — a poster made from a conversation only two people have.</span>
+    <span>Made with no server, no account and no tracking.</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+/* ---- parser.js ---- */
+/* Longthread — WhatsApp export parser.
+   Handles the format variants WhatsApp emits across platforms and locales:
+
+   Android : 06/03/2017, 00:45 - Name: message
+             6/3/17, 12:45 am - Name: message
+             06.03.2017, 00:45 - Name: message
+   iOS     : [06/03/2017, 12:45:33] Name: message
+             [6/3/17, 12:45:33 AM] Name: message
+   Plus: U+200E/U+200F direction marks, U+202F/U+00A0 before AM/PM,
+   multi-line messages, system messages, media placeholders.
+*/
+
+// A leading timestamp, either bracketed (iOS) or followed by " - " (Android).
+const D = '(\\d{1,4})[./-](\\d{1,2})[./-](\\d{2,4})';
+const T = '(\\d{1,2}):(\\d{2})(?::(\\d{2}))?';
+const AMPM = '(?:[\\s\\u202f\\u00a0]*([APap])\\.?[\\s]?[Mm]\\.?)?';
+const MARKS = '[\\u200e\\u200f\\u202a-\\u202e\\ufeff]';
+
+const RE_IOS = new RegExp(`^${MARKS}*\\[${D},?\\s+${T}${AMPM}\\s*\\]\\s*(.*)$`);
+const RE_ANDROID = new RegExp(`^${MARKS}*${D},?\\s+${T}${AMPM}\\s+[-–]\\s+(.*)$`);
+
+const stripMarks = (s) => s.replace(new RegExp(MARKS, 'g'), '');
+
+// Body looks like "Sender Name: text". System messages have no sender.
+// Sender names can contain colons rarely; we take the first ": " and sanity-check length.
+function splitSender(body) {
+  const i = body.indexOf(': ');
+  if (i === -1 || i > 120) return { author: null, text: body.trim() };
+  const author = body.slice(0, i).trim();
+  // A "sender" containing a newline is really a system message with a colon in it.
+  if (!author || author.includes('\n')) return { author: null, text: body.trim() };
+  return { author, text: body.slice(i + 2) };
+}
+
+const MEDIA_RE = /^(<media omitted>|<attached:|image omitted|video omitted|sticker omitted|audio omitted|gif omitted|document omitted|contact card omitted|‎?\[?photo\]?|null)/i;
+const DELETED_RE = /^(this message was deleted|you deleted this message|deleted this message)/i;
+
+/** Parse raw export text into { messages, senders, warnings }. */
+function parseChat(raw) {
+  const lines = raw.replace(/\r\n?/g, '\n').split('\n');
+  const raws = []; // { d, m, y, hh, mm, ss, ap, body }
+  let cur = null;
+
+  for (const line of lines) {
+    let m = RE_IOS.exec(line) || RE_ANDROID.exec(line);
+    if (m) {
+      if (cur) raws.push(cur);
+      cur = {
+        a: +m[1], b: +m[2], y: +m[3],
+        hh: +m[4], mm: +m[5], ss: m[6] ? +m[6] : 0,
+        ap: m[7] ? m[7].toLowerCase() : null,
+        body: m[8],
+      };
+    } else if (cur) {
+      cur.body += '\n' + line; // continuation of a multi-line message
+    }
+    // lines before the first timestamp are dropped (rare export preamble)
+  }
+  if (cur) raws.push(cur);
+
+  if (!raws.length) return { messages: [], senders: [], warnings: ['no-timestamps'] };
+
+  // Infer whether the first date component is the day or the month.
+  // NB: a plain loop, not Math.max(...array) — spreading a long chat's worth of
+  // values as function arguments overflows the call stack on real exports.
+  let dayFirst = true;
+  let aOver12 = false, bOver12 = false;
+  for (const r of raws) {
+    if (r.a > 12) aOver12 = true;
+    if (r.b > 12) bOver12 = true;
+    if (aOver12 && bOver12) break;
+  }
+  if (aOver12 && !bOver12) dayFirst = true;
+  else if (bOver12 && !aOver12) dayFirst = false;
+  // else ambiguous (every component <= 12) — day-first is right for most locales.
+
+  const messages = [];
+  const senderSet = new Map();
+
+  for (const r of raws) {
+    const day = dayFirst ? r.a : r.b;
+    const month = dayFirst ? r.b : r.a;
+    let year = r.y;
+    if (year < 100) year += year < 70 ? 2000 : 1900;
+
+    let hour = r.hh;
+    if (r.ap) {
+      if (r.ap === 'p' && hour !== 12) hour += 12;
+      if (r.ap === 'a' && hour === 12) hour = 0;
+    }
+    const date = new Date(year, month - 1, day, hour, r.mm, r.ss);
+    if (isNaN(date.getTime())) continue;
+
+    const { author, text } = splitSender(stripMarks(r.body));
+    const clean = text.trim();
+    const isMedia = MEDIA_RE.test(clean);
+    const isDeleted = DELETED_RE.test(clean);
+
+    if (author) senderSet.set(author, (senderSet.get(author) || 0) + 1);
+
+    messages.push({
+      date,
+      author,               // null = system message
+      text: clean,
+      media: isMedia,
+      deleted: isDeleted,
+      // words counted only for real prose
+      words: author && !isMedia && !isDeleted ? countWords(clean) : 0,
+    });
+  }
+
+  const senders = [...senderSet.entries()]
+    .sort((x, y) => y[1] - x[1])
+    .map(([name, count]) => ({ name, count }));
+
+  const warnings = [];
+  if (!senders.length) warnings.push('no-senders');
+  if (senders.length > 2) warnings.push('group-chat');
+
+  return { messages, senders, warnings, dayFirst };
+}
+
+function countWords(s) {
+  const m = s.trim().match(/[\p{L}\p{N}'’]+/gu);
+  return m ? m.length : 0;
+}
+
+/* ---- analyze.js ---- */
+/* Longthread — turns parsed messages into the numbers the poster is made of. */
+
+const STOP = new Set(`a about after again all also am an and any are as at be because been before being
+but by can cant come could did didnt do does doing dont down each even ever every for from get gets
+getting go going good got had has have having he her here hers him his how i id if ill im in into is
+isnt it its ive just keep know like ll lot make many may me might more most much must my need no nor
+not now of off ok okay on once one only or other our out over own re really right said same say says
+see she should so some still such take than that thats the their them then there these they thing
+things think this those though through time to too two up us use very want was way we well were what
+when where which while who why will with would yeah yes yet you your youre yours ha haha hahaha lol
+hai hain hi hey oh um uh aur kya hoon nahi tha thi bhi toh kar ke se ko ka ki me mein na ho hu hu
+haan acha bas abhi ab kuch koi ye wo woh sab par pe on u ur k n s t m d ve don didn doesn isn wasn`
+  .split(/\s+/).filter(Boolean));
+
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const DAY_MS = 86400000;
+
+function analyze(parsed, opts = {}) {
+  const msgs = parsed.messages.filter((m) => m.author);
+  if (!msgs.length) return null;
+
+  // Two principals: the top two senders. Everyone else folds into "others".
+  // The poster is built on the contrast between two people, so one sender
+  // (an export with only your own messages, say) has nothing to draw.
+  if (parsed.senders.length < 2) return null;
+  const principals = parsed.senders.slice(0, 2).map((s) => s.name);
+  const [A, B] = principals;
+  const side = (name) => (name === A ? 0 : name === B ? 1 : -1);
+
+  const first = msgs[0].date, last = msgs[msgs.length - 1].date;
+  const spanDays = Math.max(1, Math.round((startOfDay(last) - startOfDay(first)) / DAY_MS) + 1);
+
+  const people = principals.map((name) => ({
+    name, messages: 0, words: 0, media: 0, emoji: new Map(), words_: new Map(),
+    replyGaps: [], initiations: 0, longest: { len: 0, text: '' },
+  }));
+
+  const daily = new Map();          // dayKey -> [countA, countB]
+  const byHour = [ new Array(24).fill(0), new Array(24).fill(0) ];
+  const byWeekday = new Array(7).fill(0);
+  const monthly = new Map();        // 'YYYY-MM' -> total
+
+  let prev = null;
+
+  for (const m of msgs) {
+    const s = side(m.author);
+    if (s === -1) continue;
+    const p = people[s];
+    p.messages++;
+    p.words += m.words;
+    if (m.media) p.media++;
+
+    if (!m.media && !m.deleted) {
+      if (m.text.length > p.longest.len) p.longest = { len: m.text.length, text: m.text };
+      for (const e of m.text.match(EMOJI_RE) || []) p.emoji.set(e, (p.emoji.get(e) || 0) + 1);
+      for (const w of tokens(m.text)) if (!STOP.has(w) && w.length > 2) p.words_.set(w, (p.words_.get(w) || 0) + 1);
+    }
+
+    const k = dayKey(m.date);
+    if (!daily.has(k)) daily.set(k, [0, 0]);
+    daily.get(k)[s]++;
+
+    byHour[s][m.date.getHours()]++;
+    byWeekday[m.date.getDay()]++;
+    const mk = `${m.date.getFullYear()}-${String(m.date.getMonth() + 1).padStart(2, '0')}`;
+    monthly.set(mk, (monthly.get(mk) || 0) + 1);
+
+    if (prev) {
+      const gap = m.date - prev.date;
+      if (prev.side !== s && gap > 0 && gap < 12 * 3600e3) p.replyGaps.push(gap);
+      // A message after a 6h silence counts as starting the conversation.
+      if (gap > 6 * 3600e3) p.initiations++;
+    } else {
+      p.initiations++;
+    }
+    prev = { date: m.date, side: s };
+  }
+
+  // Longest unbroken run of days with at least one message.
+  const keys = [...daily.keys()].sort();
+  let streak = 0, run = 0, prevT = null, streakEnd = null, runEnd = null;
+  for (const k of keys) {
+    const t = new Date(k + 'T00:00:00').getTime();
+    run = prevT !== null && t - prevT === DAY_MS ? run + 1 : 1;
+    runEnd = k;
+    if (run > streak) { streak = run; streakEnd = runEnd; }
+    prevT = t;
+  }
+
+  let busiest = { key: keys[0], count: 0 };
+  for (const [k, v] of daily) {
+    const c = v[0] + v[1];
+    if (c > busiest.count) busiest = { key: k, count: c };
+  }
+
+  const firstReal = msgs.find((m) => !m.media && !m.deleted && m.text.length > 1) || msgs[0];
+  const lastReal = [...msgs].reverse().find((m) => !m.media && !m.deleted && m.text.length > 1) || msgs[msgs.length - 1];
+
+  for (const p of people) {
+    p.avgWords = p.messages ? p.words / p.messages : 0;
+    p.medianReply = median(p.replyGaps);
+    p.topEmoji = top(p.emoji, 5);
+    p.topWords = top(p.words_, 6);
+  }
+
+  const total = people[0].messages + people[1].messages;
+
+  // Only messages that are actually something someone said — these are what the
+  // poster is built from now, both as printed text and as extracted moments.
+  const said = msgs.filter((m) => side(m.author) !== -1 && !m.media && !m.deleted && m.text.length > 1);
+
+  return {
+    said,
+    moments: findMoments(said, side),
+    people, principals, first, last, spanDays,
+    daysTalked: daily.size,
+    total,
+    totalWords: people[0].words + people[1].words,
+    daily, byHour, byWeekday, monthly,
+    streak, streakEnd,
+    busiest,
+    firstMessage: firstReal,
+    lastMessage: lastReal,
+    perDay: total / spanDays,
+    otherSenders: parsed.senders.slice(2).map((s) => s.name),
+  };
+}
+
+function tokens(s) {
+  return (s.toLowerCase().match(/[\p{L}][\p{L}'’]*/gu) || []).map((w) => w.replace(/['’]/g, ''));
+}
+function top(map, n) {
+  return [...map.entries()].sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+function median(arr) {
+  if (!arr.length) return null;
+  const s = [...arr].sort((a, b) => a - b);
+  const i = Math.floor(s.length / 2);
+  return s.length % 2 ? s[i] : (s[i - 1] + s[i]) / 2;
+}
+function startOfDay(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+const fmt = {
+  int: (n) => n.toLocaleString('en-US'),
+  dur: (ms) => {
+    if (ms == null) return '—';
+    const s = ms / 1000;
+    if (s < 60) return `${Math.round(s)} sec`;
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    return `${(s / 3600).toFixed(1)} hr`;
+  },
+  date: (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+  dateKey: (k) => new Date(k + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }),
+};
+
+/* ------------------------------------------------------------------ moments
+
+   The poster's emotional content. Every one of these is a real thing that was
+   really said — computed, never invented, and never paraphrased.
+*/
+const DAY = 86400000;
+
+function findMoments(said, side) {
+  if (!said.length) return [];
+  const out = [];
+
+  // 1. Where it started.
+  out.push({
+    key: 'first',
+    label: 'How it started',
+    text: said[0].text,
+    author: said[0].author,
+    side: side(said[0].author),
+    date: said[0].date,
+    note: null,
+  });
+
+  // 2. The longest silence, and whoever broke it.
+  let gap = 0, breaker = null;
+  for (let i = 1; i < said.length; i++) {
+    const g = said[i].date - said[i - 1].date;
+    if (g > gap) { gap = g; breaker = said[i]; }
+  }
+  if (breaker && gap >= 4 * DAY) {
+    const days = Math.round(gap / DAY);
+    out.push({
+      key: 'silence',
+      label: `After ${days} days of nothing`,
+      text: breaker.text,
+      author: breaker.author,
+      side: side(breaker.author),
+      date: breaker.date,
+      note: `the longest either of you went`,
+    });
+  }
+
+  // 3. The small hours.
+  let latest = null, latestScore = -1;
+  for (const m of said) {
+    const h = m.date.getHours();
+    if (h < 1 || h > 4) continue;
+    const score = h * 60 + m.date.getMinutes();
+    if (score > latestScore) { latestScore = score; latest = m; }
+  }
+  if (latest) {
+    out.push({
+      key: 'late',
+      label: 'The latest you ever stayed up',
+      text: latest.text,
+      author: latest.author,
+      side: side(latest.author),
+      date: latest.date,
+      note: timeOf(latest.date),
+    });
+  }
+
+  // 4. The thing one of you keeps saying.
+  const counts = new Map();
+  for (const m of said) {
+    const t = m.text.trim().toLowerCase();
+    if (t.length < 5 || t.length > 40) continue;
+    const e = counts.get(t) || { n: 0, m };
+    e.n++;
+    counts.set(t, e);
+  }
+  let rep = null;
+  for (const [, e] of counts) if (e.n >= 4 && (!rep || e.n > rep.n)) rep = e;
+  if (rep) {
+    out.push({
+      key: 'repeat',
+      label: `Said ${rep.n} times`,
+      text: rep.m.text,
+      author: rep.m.author,
+      side: side(rep.m.author),
+      date: null,
+      note: 'over and over and over',
+    });
+  }
+
+  // 5. Fallback — the longest thing anyone bothered to type.
+  if (out.length < 4) {
+    let longest = said[0];
+    for (const m of said) if (m.text.length > longest.text.length) longest = m;
+    out.push({
+      key: 'longest',
+      label: 'The longest thing either of you wrote',
+      text: longest.text,
+      author: longest.author,
+      side: side(longest.author),
+      date: longest.date,
+      note: `${longest.text.length} characters`,
+    });
+  }
+
+  return out.slice(0, 4);
+}
+
+function timeOf(d) {
+  const h = d.getHours();
+  const suffix = h < 12 ? 'am' : 'pm';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}.${String(d.getMinutes()).padStart(2, '0')}${suffix}`;
+}
+
+/* ---- poster.js ---- */
+/* Longthread — poster renderer.
+
+   The poster is made of what was actually said. Its body is the conversation
+   itself, one message per line, set at 3pt: a field of real text you can only
+   read with your nose against the paper. Below it are four moments the
+   analyser found — how it started, the longest silence and whoever broke it,
+   the latest either of you stayed up, the thing one of you keeps saying.
+   Statistics are the frame, not the subject.
+
+   Drawn in a virtual 1000 x 1414.4 unit space. At scale 2.48 that is exactly
+   2480 x 3508 — A4 at 300dpi. Every palette passed the six-check validator.
+*/
+
+const THEMES = {
+  nightfall: {
+    label: 'Nightfall',
+    bg: '#0E141B', ink: '#EEF2F6', muted: '#8A97A6', rule: '#243040',
+    a: '#C18421', b: '#259CB5', dark: true,
+  },
+  ember: {
+    label: 'Ember',
+    bg: '#141110', ink: '#F4EFEA', muted: '#9A8F86', rule: '#2E2724',
+    a: '#F1383E', b: '#28A897', dark: true,
+  },
+  archive: {
+    label: 'Archive',
+    bg: '#F2F1EE', ink: '#14181D', muted: '#6B7280', rule: '#D8D6D0',
+    a: '#125EC3', b: '#C94D19', dark: false,
+  },
+};
+
+const DISPLAY = '"Instrument Serif", "Iowan Old Style", Georgia, serif';
+const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
+
+const W = 1000, H = 1414.4, M = 82;
+
+/* One vertical budget for the whole poster, so sections cannot collide. */
+const L = {
+  keyline: 56,
+  eyebrow: 106, names: 172, range: 202, ruleTop: 226,
+  statLabel: 252, statValue: 282, ruleStats: 302,
+
+  microTop: 324, microBot: 858,
+  microCaption: 882, ruleMicro: 902,
+
+  momentsTop: 936, momentsRowH: 152, momentCols: 2,
+  ruleMoments: 1248,
+
+  seismoTop: 1266, seismoBot: 1316,
+  ruleFoot: 1332, footText: 1358,
+};
+
+/* 3pt at 300dpi is about the smallest that stays readable on paper:
+   3pt = 12.5 device px = ~5.04 units at scale 2.48. */
+const MICRO_SIZE = 5.1;
+const MICRO_LEAD = 6.3;
+const MICRO_COLS = 7;
+const MICRO_GUTTER = 9;
+
+/* ---------- helpers ---------- */
+
+function tracked(ctx, text, x, y, spacing, align = 'left') {
+  const chars = [...text];
+  let total = 0;
+  for (const c of chars) total += ctx.measureText(c).width + spacing;
+  total -= spacing;
+  let cx = align === 'center' ? x - total / 2 : align === 'right' ? x - total : x;
+  for (const c of chars) {
+    ctx.fillText(c, cx, y);
+    cx += ctx.measureText(c).width + spacing;
+  }
+  return total;
+}
+
+function wrap(ctx, text, maxW, maxLines) {
+  const words = text.replace(/\s+/g, ' ').trim().split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const t = line ? line + ' ' + w : w;
+    if (ctx.measureText(t).width > maxW && line) {
+      lines.push(line);
+      line = w;
+      if (lines.length === maxLines) break;
+    } else line = t;
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  if (lines.length === maxLines) {
+    const consumed = lines.join(' ').split(' ').length;
+    if (consumed < words.length) {
+      let last = lines[maxLines - 1];
+      while (ctx.measureText(last + '…').width > maxW && last.includes(' ')) {
+        last = last.slice(0, last.lastIndexOf(' '));
+      }
+      lines[maxLines - 1] = last + '…';
+    }
+  }
+  return lines;
+}
+
+function fitFont(ctx, text, maxW, startPx, family, weight = '') {
+  let px = startPx;
+  do {
+    ctx.font = `${weight} ${px}px ${family}`.trim();
+    if (ctx.measureText(text).width <= maxW) break;
+    px -= 1;
+  } while (px > 8);
+  return px;
+}
+
+function rule(ctx, t, y, x0 = M, x1 = W - M) {
+  ctx.strokeStyle = t.rule;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x0, y + 0.5);
+  ctx.lineTo(x1, y + 0.5);
+  ctx.stroke();
+}
+
+function eyebrow(ctx, t, text, x, y, align = 'left', color) {
+  ctx.font = `500 10.5px ${MONO}`;
+  ctx.fillStyle = color || t.muted;
+  return tracked(ctx, text.toUpperCase(), x, y, 2.4, align);
+}
+
+/* ---------- the poster ---------- */
+
+function drawPoster(ctx, a, opts) {
+  const t = THEMES[opts.theme] || THEMES.nightfall;
+  const S = opts.scale;
+  const nameA = opts.nameA || a.people[0].name;
+  const nameB = opts.nameB || a.people[1].name;
+
+  ctx.save();
+  ctx.scale(S, S);
+  ctx.textBaseline = 'alphabetic';
+
+  ctx.fillStyle = t.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = t.rule;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(L.keyline, L.keyline, W - L.keyline * 2, H - L.keyline * 2);
+
+  header(ctx, t, a, nameA, nameB);
+  statStrip(ctx, t, a);
+  const shown = microField(ctx, t, a);
+  microCaption(ctx, t, a, shown);
+  moments(ctx, t, a, nameA, nameB);
+  seismoBand(ctx, t, a, nameA, nameB);
+  footer(ctx, t, opts);
+
+  if (opts.watermark) watermark(ctx, t);
+
+  ctx.restore();
+}
+
+function header(ctx, t, a, nameA, nameB) {
+  eyebrow(ctx, t, 'Everything that was said between', W / 2, L.eyebrow, 'center');
+
+  const gap = 17;
+  let px = 58;
+  ctx.font = `400 ${px}px ${DISPLAY}`;
+  let wA = ctx.measureText(nameA).width, wAmp = ctx.measureText('&').width, wB = ctx.measureText(nameB).width;
+  let total = wA + wB + wAmp + gap * 2;
+  const maxW = W - M * 2;
+  if (total > maxW) {
+    px = Math.floor(px * (maxW / total));
+    ctx.font = `400 ${px}px ${DISPLAY}`;
+    wA = ctx.measureText(nameA).width; wAmp = ctx.measureText('&').width; wB = ctx.measureText(nameB).width;
+    total = wA + wB + wAmp + gap * 2;
+  }
+  let x = (W - total) / 2;
+  ctx.fillStyle = t.a; ctx.fillText(nameA, x, L.names); x += wA + gap;
+  ctx.fillStyle = t.muted; ctx.fillText('&', x, L.names); x += wAmp + gap;
+  ctx.fillStyle = t.b; ctx.fillText(nameB, x, L.names);
+
+  eyebrow(ctx, t, `${fmtDate(a.first)}  —  ${fmtDate(a.last)}`, W / 2, L.range, 'center');
+  rule(ctx, t, L.ruleTop);
+}
+
+function statStrip(ctx, t, a) {
+  const cells = [
+    ['Messages', compact(a.total)],
+    ['Words', compact(a.totalWords)],
+    ['Days in touch', compact(a.daysTalked)],
+    ['Longest streak', `${a.streak}d`],
+    ['Balance', balance(a)],
+  ];
+  const colW = (W - M * 2) / cells.length;
+  cells.forEach((c, i) => {
+    const cx = M + colW * i + colW / 2;
+    eyebrow(ctx, t, c[0], cx, L.statLabel, 'center');
+    ctx.fillStyle = t.ink;
+    const px = fitFont(ctx, c[1], colW - 16, 26, DISPLAY);
+    ctx.font = `400 ${px}px ${DISPLAY}`;
+    const w = ctx.measureText(c[1]).width;
+    ctx.fillText(c[1], cx - w / 2, L.statValue);
+  });
+  rule(ctx, t, L.ruleStats);
+}
+
+/* The body of the poster: the conversation itself, one message per line, at
+   3pt. Returns how many were printed so the caption underneath can be honest. */
+function microField(ctx, t, a) {
+  const x0 = M, y0 = L.microTop, y1 = L.microBot;
+  const fieldW = W - M * 2;
+  const colW = (fieldW - MICRO_GUTTER * (MICRO_COLS - 1)) / MICRO_COLS;
+  const rows = Math.floor((y1 - y0) / MICRO_LEAD);
+  const capacity = rows * MICRO_COLS;
+
+  const src = a.said;
+  if (!src || !src.length) return 0;
+
+  // If it all fits, print all of it. Otherwise take an even spread across the
+  // whole span, so the texture represents the relationship, not a slice of it.
+  const n = Math.min(capacity, src.length);
+  const step = src.length / n;
+
+  ctx.font = `400 ${MICRO_SIZE}px ${MONO}`;
+  const charW = ctx.measureText('M').width || MICRO_SIZE * 0.6;
+  const maxChars = Math.max(4, Math.floor(colW / charW));
+
+  ctx.globalAlpha = t.dark ? 0.74 : 0.9;
+  for (let i = 0; i < n; i++) {
+    const m = src[Math.floor(i * step)];
+    if (!m) continue;
+    const col = Math.floor(i / rows);
+    if (col >= MICRO_COLS) break;
+    const row = i % rows;
+    const x = x0 + col * (colW + MICRO_GUTTER);
+    const y = y0 + row * MICRO_LEAD + MICRO_SIZE;
+    let s = m.text.replace(/\s+/g, ' ').trim();
+    if (s.length > maxChars) s = s.slice(0, maxChars - 1) + '…';
+    ctx.fillStyle = m.author === a.people[0].name ? t.a : t.b;
+    ctx.fillText(s, x, y);
+  }
+  ctx.globalAlpha = 1;
+  return n;
+}
+
+function microCaption(ctx, t, a, shown) {
+  const all = a.said.length;
+  const text = shown >= all
+    ? `every one of the ${fmtInt(all)} things you said to each other, printed small enough to fit`
+    : `${fmtInt(shown)} of the ${fmtInt(all)} things you said — one in every ${Math.round(all / shown)} — printed small enough to fit`;
+  eyebrow(ctx, t, text, W / 2, L.microCaption, 'center');
+  rule(ctx, t, L.ruleMicro);
+}
+
+/* Four things that were really said, found by the analyser. */
+function moments(ctx, t, a, nameA, nameB) {
+  const list = a.moments || [];
+  if (!list.length) return;
+  const gutter = 24;
+  const colW = (W - M * 2 - gutter) / L.momentCols;
+
+  list.slice(0, 4).forEach((mo, i) => {
+    const col = i % L.momentCols;
+    const row = Math.floor(i / L.momentCols);
+    const x = M + col * (colW + gutter);
+    const y = L.momentsTop + row * L.momentsRowH;
+    const accent = mo.side === 0 ? t.a : t.b;
+    const who = mo.side === 0 ? nameA : nameB;
+
+    eyebrow(ctx, t, mo.label, x, y, 'left', accent);
+
+    ctx.fillStyle = t.ink;
+    ctx.font = `400 24px ${DISPLAY}`;
+    const lines = wrap(ctx, `“${mo.text.replace(/\s+/g, ' ').trim()}”`, colW, 3);
+    lines.forEach((ln, k) => ctx.fillText(ln, x, y + 32 + k * 28));
+
+    const bits = [who.toUpperCase()];
+    if (mo.date) bits.push(fmtDate(mo.date).toUpperCase());
+    if (mo.note) bits.push(mo.note.toUpperCase());
+    ctx.font = `500 9.5px ${MONO}`;
+    ctx.fillStyle = t.muted;
+    tracked(ctx, bits.join('  ·  '), x, y + 32 + lines.length * 28 + 8, 2, 'left');
+  });
+  rule(ctx, t, L.ruleMoments);
+}
+
+/* A slim mirrored daily band: one mark per day, one of you above the line and
+   the other below, so the shape of the whole thing anchors the foot of the page. */
+function seismoBand(ctx, t, a, nameA, nameB) {
+  const x0 = M, x1 = W - M, top = L.seismoTop, bot = L.seismoBot;
+  const axis = Math.round((top + bot) / 2) + 0.5;
+  const half = (bot - top) / 2 - 2;
+  const plotW = x1 - x0;
+
+  const day0 = dayStartMs(a.first);
+  const nDays = a.spanDays;
+  const cols = Math.min(nDays, Math.max(24, Math.floor(plotW / 2.2)));
+  const perCol = nDays / cols;
+  const bucket = Array.from({ length: cols }, () => [0, 0]);
+  for (const [k, v] of a.daily) {
+    const idx = Math.min(cols - 1, Math.floor(((new Date(k + 'T00:00:00').getTime() - day0) / 86400000) / perCol));
+    if (idx >= 0) { bucket[idx][0] += v[0]; bucket[idx][1] += v[1]; }
+  }
+
+  const all = bucket.flatMap((b) => [b[0], b[1]]).filter((v) => v > 0).sort((p, q) => p - q);
+  const cap = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.97))] : 1;
+  const sc = (v) => Math.min(1, v / cap) * half;
+
+  const colW = plotW / cols;
+  const barW = Math.max(1, colW * 0.56);
+
+  for (let i = 0; i < cols; i++) {
+    const x = x0 + i * colW;
+    const [va, vb] = bucket[i];
+    if (va) { ctx.fillStyle = t.a; ctx.fillRect(x, axis - sc(va), barW, sc(va)); }
+    if (vb) { ctx.fillStyle = t.b; ctx.fillRect(x, axis + 1, barW, sc(vb)); }
+  }
+
+  ctx.font = `500 9px ${MONO}`;
+  ctx.fillStyle = t.a; tracked(ctx, nameA.toUpperCase(), x0, top - 8, 1.8, 'left');
+  ctx.fillStyle = t.b; tracked(ctx, nameB.toUpperCase(), x1, top - 8, 1.8, 'right');
+}
+
+function footer(ctx, t, opts) {
+  rule(ctx, t, L.ruleFoot);
+  ctx.fillStyle = t.a; ctx.beginPath(); ctx.arc(M + 4, L.footText - 4, 4, 0, 7); ctx.fill();
+  ctx.fillStyle = t.b; ctx.beginPath(); ctx.arc(M + 13, L.footText - 4, 4, 0, 7); ctx.fill();
+  eyebrow(ctx, t, opts.domain || 'longthread', M + 30, L.footText);
+  eyebrow(ctx, t, 'Every word on this page was really said', W - M, L.footText, 'right');
+}
+
+function watermark(ctx, t) {
+  ctx.save();
+  ctx.globalAlpha = t.dark ? 0.26 : 0.22;
+  ctx.fillStyle = t.ink;
+  ctx.font = `500 30px ${MONO}`;
+  ctx.translate(W / 2, H / 2);
+  ctx.rotate(-Math.PI / 5);
+  for (let r = -7; r <= 7; r++) {
+    for (let c = -2; c <= 2; c++) {
+      tracked(ctx, 'PREVIEW  ·  LONGTHREAD', c * 520, r * 120, 5, 'center');
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------- formatting ---------- */
+
+const dayStartMs = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+const fmtInt = (n) => n.toLocaleString('en-US');
+
+function compact(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e4) return Math.round(n / 1e3) + 'k';
+  return n.toLocaleString('en-US');
+}
+function balance(a) {
+  const [p, q] = a.people;
+  const tot = p.messages + q.messages;
+  const pa = Math.round((p.messages / tot) * 100);
+  return `${pa}/${100 - pa}`;
+}
+
+/* ---- demo.js ---- */
+/* A fictional two-year conversation, used for the sample poster on the landing
+   page. Deterministic, so the sample never changes between visits. */
+
+const OPENERS = [
+  'ok so', 'wait', 'listen', 'guess what', 'right so', 'quick one', 'unrelated but',
+];
+const A_LINES = [
+  'i cannot believe you did that', 'are you awake', 'call me when you land',
+  'the coffee place moved. i am bereft ☕', 'send the photo again i lost it',
+  'i made the soup. it worked!!', 'this song is you, entirely', 'ok your turn to choose',
+  'thinking about the boat thing again 🚤', 'do not let me buy another plant',
+  'i bought another plant 🌿', 'you were right and i hate it',
+  'three more days', 'two more days', 'ONE more day', 'landed ✈️',
+  'the light here is ridiculous', 'i saved you the corner piece',
+  'tell me the long version', 'that is the funniest thing i have read all week 😂',
+];
+const B_LINES = [
+  'obviously i did that', 'always awake', 'landing 6:40, will call',
+  'we will find a new one, together, bravely', 'sending. do not lose it again',
+  'the soup!! proud of you', 'i will allow it', 'you always say that then choose anyway',
+  'the boat thing is happening. i have decided 🚤', 'you will buy another plant',
+  'called it 🌿', 'i am always right, it is exhausting',
+  'counting', 'still counting', 'ok now i am nervous', 'finally 🎉',
+  'take a picture of the light for me', 'this is why i keep you around',
+  'long version incoming, get comfortable', 'wait until you hear the rest 😂',
+];
+
+function demoText() {
+  let s = 20240607;
+  const rnd = () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+  const pad = (n) => String(n).padStart(2, '0');
+  const start = new Date(2023, 1, 14, 22, 41, 0);
+  const out = [];
+
+  // 730 days, with an intensity curve so the seismograph has real shape
+  for (let day = 0; day < 730; day++) {
+    const seasonal = 0.55 + 0.45 * Math.sin((day / 730) * Math.PI * 2.6);
+    const burst = day > 300 && day < 340 ? 2.6 : 1;         // the trip
+    const quiet = day > 500 && day < 545 ? 0.4 : 1;         // the falling-out
+    const n = Math.max(0, Math.round((rnd() * 9 * seasonal * burst * quiet) - 1));
+    let hour = 8 + Math.floor(rnd() * 14);
+    for (let i = 0; i < n; i++) {
+      const d = new Date(start.getTime() + day * 86400000);
+      hour = Math.min(23, hour + (rnd() < 0.6 ? 0 : 1));
+      d.setHours(hour, Math.floor(rnd() * 60), 0);
+      const isA = rnd() < 0.51;
+      const pool = isA ? A_LINES : B_LINES;
+      let text = pool[Math.floor(rnd() * pool.length)];
+      if (rnd() < 0.12) text = OPENERS[Math.floor(rnd() * OPENERS.length)] + ' ' + text;
+      if (rnd() < 0.05) text = '<Media omitted>';
+      out.push({ d, author: isA ? 'Priya' : 'Arjun', text });
+    }
+  }
+  out.sort((x, y) => x.d - y.d);
+  // pin a memorable opening line
+  if (out.length) out[0].text = 'wrong number, but hello anyway';
+
+  const header = '14/02/2023, 22:41 - Messages and calls are end-to-end encrypted. No one outside of this chat can read them.';
+  return [header, ...out.map((m) => {
+    const d = m.d;
+    return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())} - ${m.author}: ${m.text}`;
+  })].join('\n');
+}
+
+/* ---- unzip.js ---- */
+/* A minimal ZIP reader for the .zip an iPhone produces.
+   Uses the browser's own DecompressionStream, so there is no library to load. */
+
+const SIG_EOCD = 0x06054b50;
+const SIG_EOCD64_LOC = 0x07064b50;
+const SIG_CEN = 0x02014b50;
+const SIG_LOC = 0x04034b50;
+
+async function extractFirstTxt(arrayBuffer) {
+  const dv = new DataView(arrayBuffer);
+  const u8 = new Uint8Array(arrayBuffer);
+
+  // End of central directory: scan back over the (max 64k) comment field
+  let eocd = -1;
+  const from = Math.max(0, dv.byteLength - 65557);
+  for (let i = dv.byteLength - 22; i >= from; i--) {
+    if (dv.getUint32(i, true) === SIG_EOCD) { eocd = i; break; }
+  }
+  if (eocd === -1) throw new Error('That does not look like a zip file.');
+
+  let count = dv.getUint16(eocd + 10, true);
+  let cenOff = dv.getUint32(eocd + 16, true);
+
+  // Zip64, in case a very long chat pushed it over the 4GB/65k fields
+  if (cenOff === 0xffffffff || count === 0xffff) {
+    for (let i = eocd - 20; i >= from; i--) {
+      if (dv.getUint32(i, true) === SIG_EOCD64_LOC) {
+        const rec = Number(dv.getBigUint64(i + 8, true));
+        if (dv.getUint32(rec, true) === 0x06064b50) {
+          count = Number(dv.getBigUint64(rec + 32, true));
+          cenOff = Number(dv.getBigUint64(rec + 48, true));
+        }
+        break;
+      }
+    }
+  }
+
+  let p = cenOff;
+  const files = [];
+  for (let i = 0; i < count && p + 46 <= dv.byteLength; i++) {
+    if (dv.getUint32(p, true) !== SIG_CEN) break;
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const cmtLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true);
+    const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+    files.push({ name, method, compSize, localOff });
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+
+  const target = files.find((f) =>
+    f.name.toLowerCase().endsWith('.txt') && !f.name.split('/').pop().startsWith('.'));
+  if (!target) throw new Error('That zip has no chat .txt inside it.');
+
+  // local header — name/extra lengths here can differ from the central copy
+  if (dv.getUint32(target.localOff, true) !== SIG_LOC) throw new Error('That zip looks damaged.');
+  const nLen = dv.getUint16(target.localOff + 26, true);
+  const eLen = dv.getUint16(target.localOff + 28, true);
+  const start = target.localOff + 30 + nLen + eLen;
+  const raw = u8.subarray(start, start + target.compSize);
+
+  if (target.method === 0) return new TextDecoder().decode(raw);
+  if (target.method !== 8) throw new Error('That zip uses a compression this page cannot read. Unzip it yourself and drop the .txt.');
+  if (typeof DecompressionStream === 'undefined') {
+    throw new Error('This browser cannot open zip files. Unzip it yourself and drop the .txt inside.');
+  }
+
+  const stream = new Blob([raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new TextDecoder().decode(await new Response(stream).arrayBuffer());
+}
+
+/* ---- app.js ---- */
+/* Longthread — page behaviour. Everything here runs in the visitor's tab;
+   no chat data is ever sent anywhere. */
+
+
+
+
+
+/* ------------------------------------------------------------------ config */
+const CONFIG = {
+  // Set these once the Gumroad product exists. See SETUP.md.
+  gumroadProductId: 'REPLACE_WITH_GUMROAD_PRODUCT_ID',
+  gumroadUrl: 'https://gumroad.com/l/REPLACE',
+  // Gumroad's verify endpoint. If it blocks browser calls, point this at the
+  // Cloudflare Worker in SETUP.md instead.
+  verifyUrl: 'https://api.gumroad.com/v2/licenses/verify',
+  price: '$19',
+  domain: 'longthread',
+};
+const configured = () => !CONFIG.gumroadProductId.startsWith('REPLACE');
+
+/* ------------------------------------------------------------------- state */
+const state = {
+  analysis: null,
+  theme: 'nightfall',
+  nameA: '', nameB: '',
+  unlocked: false,
+  isDemo: false,
+};
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+
+/* --------------------------------------------------------------- rendering */
+
+const PREVIEW_SCALE = 1.1;          // on-screen
+const PRINT_SCALE = 2.48;           // A4 @ 300dpi -> 2480 x 3508
+
+async function fontsReady() {
+  try {
+    await Promise.all([
+      document.fonts.load('400 62px "Instrument Serif"'),
+      document.fonts.load('500 11px "IBM Plex Mono"'),
+      document.fonts.load('400 11px "IBM Plex Mono"'),
+    ]);
+    await document.fonts.ready;
+  } catch { /* fallback stacks will be used */ }
+}
+
+function renderTo(canvas, scale, watermark) {
+  canvas.width = Math.round(1000 * scale);
+  canvas.height = Math.round(1414.4 * scale);
+  drawPoster(canvas.getContext('2d'), state.analysis, {
+    theme: state.theme,
+    scale,
+    watermark,
+    nameA: state.nameA,
+    nameB: state.nameB,
+    domain: CONFIG.domain,
+  });
+}
+
+function refresh() {
+  if (!state.analysis) return;
+  renderTo($('#poster'), PREVIEW_SCALE, !state.unlocked);
+  $('#summary').innerHTML = summaryHTML(state.analysis);
+  $('#lockNote').hidden = state.unlocked;
+  $('#unlockedNote').hidden = !state.unlocked;
+}
+
+/* ------------------------------------------------------------------ upload */
+
+async function readFile(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.zip')) return await extractFirstTxt(await file.arrayBuffer());
+  return await file.text();
+}
+
+async function handleText(text, { isDemo = false } = {}) {
+  setStage('working');
+  await new Promise((r) => setTimeout(r, 40)); // let the spinner paint
+
+  const parsed = parseChat(text);
+  if (parsed.warnings.includes('no-timestamps')) {
+    return fail('That file does not look like a WhatsApp export. Export the chat again and choose “Without media”, then drop the .txt file here.');
+  }
+  if (parsed.warnings.includes('no-senders')) {
+    return fail('That export has no messages in it — only system notices.');
+  }
+  if (parsed.senders.length < 2) {
+    return fail(`Only one person is writing in that export — ${parsed.senders[0].name}. A Longthread poster is built from the back-and-forth between two people, so it needs a chat with both sides in it.`);
+  }
+  const a = analyze(parsed);
+  if (!a || a.total < 20) {
+    return fail(`Only ${a ? a.total : 0} messages found. A poster needs a bit more of a conversation than that.`);
+  }
+
+  state.analysis = a;
+  state.isDemo = isDemo;
+  state.unlocked = false;
+  state.nameA = a.people[0].name;
+  state.nameB = a.people[1].name;
+
+  $('#nameA').value = state.nameA;
+  $('#nameB').value = state.nameB;
+
+  const groupNote = $('#groupNote');
+  if (parsed.warnings.includes('group-chat')) {
+    groupNote.hidden = false;
+    groupNote.textContent = `This looks like a group chat. The poster uses the two people who wrote most — ${state.nameA} and ${state.nameB} — and sets the rest aside.`;
+  } else groupNote.hidden = true;
+
+  $('#summary').innerHTML = summaryHTML(a);
+  await fontsReady();
+  setStage('result');
+  refresh();
+  $('#result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function summaryHTML(a) {
+  const [p, q] = a.people;
+  const nA = state.nameA || p.name, nB = state.nameB || q.name;
+  const rows = [
+    ['Messages', fmt.int(a.total)],
+    ['Days in touch', `${fmt.int(a.daysTalked)} of ${fmt.int(a.spanDays)}`],
+    ['Longest streak', `${a.streak} day${a.streak === 1 ? '' : 's'}`],
+    ['Busiest day', `${a.busiest.count} on ${fmt.dateKey(a.busiest.key)}`],
+    [`${nA} wrote`, `${fmt.int(p.messages)} · replies in ${fmt.dur(p.medianReply)}`],
+    [`${nB} wrote`, `${fmt.int(q.messages)} · replies in ${fmt.dur(q.medianReply)}`],
+  ];
+  return rows.map(([k, v]) => `<div class="srow"><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('');
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function fail(msg) {
+  $('#errorText').textContent = msg;
+  setStage('error');
+}
+
+function setStage(stage) {
+  $$('[data-stage]').forEach((el) => { el.hidden = el.dataset.stage !== stage; });
+  $('#result').hidden = stage !== 'result';
+}
+
+/* ------------------------------------------------------------------ unlock */
+
+async function verifyKey(key) {
+  if (!configured()) {
+    return { ok: false, message: 'Checkout is not switched on yet on this copy of the site.' };
+  }
+  try {
+    const body = new URLSearchParams({
+      product_id: CONFIG.gumroadProductId,
+      license_key: key.trim(),
+      increment_uses_count: 'false',
+    });
+    const res = await fetch(CONFIG.verifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+    const json = await res.json();
+    if (json.success) return { ok: true };
+    return { ok: false, message: 'That key was not recognised. Check for a stray space, or paste it again from your Gumroad receipt.' };
+  } catch {
+    return { ok: false, message: 'Could not reach the licence check just now. Try again in a moment.' };
+  }
+}
+
+/* Saving works two ways: the published-preview host mediates saves through its
+   own capability, while the deployed site just uses a download link. Try the
+   first, fall back to the second, so one build covers both. */
+let downloadsApi;
+async function getDownloads() {
+  if (downloadsApi !== undefined) return downloadsApi;
+  try { downloadsApi = (await window.claude?.use?.('downloads')) ?? null; }
+  catch { downloadsApi = null; }
+  return downloadsApi;
+}
+
+async function download(scale, watermark, label) {
+  const btn = $('#downloadBtn');
+  const note = $('#downloadNote');
+  const prev = btn.textContent;
+  btn.textContent = 'Rendering…';
+  btn.disabled = true;
+  note.hidden = true;
+  await new Promise((r) => setTimeout(r, 30));
+
+  try {
+    const c = document.createElement('canvas');
+    renderTo(c, scale, watermark);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    if (!blob) throw new Error('render');
+    const filename = `${slug(state.nameA)}-and-${slug(state.nameB)}-${label}.png`;
+
+    const dl = await getDownloads();
+    if (dl) {
+      try {
+        await dl.save({ filename, data: blob });
+      } catch (err) {
+        const code = err && err.code;
+        if (code === 'declined') { /* the viewer said no; say nothing */ }
+        else if (code === 'too_large') note.textContent = 'That file came out too large to save here. Try it on the live site.';
+        else { note.textContent = 'Saving is not available in this preview. On the live site the download works normally.'; }
+        note.hidden = !note.textContent;
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }
+  } catch {
+    note.textContent = 'The poster could not be rendered at that size on this device. Try a computer, or a smaller chat.';
+    note.hidden = false;
+  } finally {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }
+}
+const slug = (s) => (s || 'us').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'us';
+
+/* -------------------------------------------------------------------- wire */
+
+function init() {
+  // theme swatches for the poster
+  const swatches = $('#themes');
+  Object.entries(THEMES).forEach(([key, t]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'swatch' + (key === state.theme ? ' on' : '');
+    b.dataset.theme = key;
+    b.setAttribute('aria-pressed', key === state.theme);
+    b.innerHTML = `<span class="chip" style="background:${t.bg}"><i style="background:${t.a}"></i><i style="background:${t.b}"></i></span>${t.label}`;
+    b.addEventListener('click', () => {
+      state.theme = key;
+      $$('.swatch', swatches).forEach((s) => {
+        s.classList.toggle('on', s.dataset.theme === key);
+        s.setAttribute('aria-pressed', s.dataset.theme === key);
+      });
+      refresh();
+    });
+    swatches.appendChild(b);
+  });
+
+  // file input + drop zone
+  const drop = $('#drop');
+  const input = $('#file');
+  $('#pick').addEventListener('click', () => input.click());
+  input.addEventListener('change', async () => {
+    if (input.files[0]) {
+      try { await handleText(await readFile(input.files[0])); }
+      catch (e) { fail(e.message); }
+    }
+  });
+  ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); drop.classList.add('over');
+  }));
+  ['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => {
+    e.preventDefault(); if (ev === 'dragleave' && drop.contains(e.relatedTarget)) return;
+    drop.classList.remove('over');
+  }));
+  drop.addEventListener('drop', async (e) => {
+    const f = e.dataTransfer.files[0];
+    if (!f) return;
+    try { await handleText(await readFile(f)); }
+    catch (err) { fail(err.message); }
+  });
+
+  // try the sample
+  $$('.try-demo').forEach((b) => b.addEventListener('click', () => handleText(demoText(), { isDemo: true })));
+
+  // names
+  $('#nameA').addEventListener('input', (e) => { state.nameA = e.target.value; refresh(); });
+  $('#nameB').addEventListener('input', (e) => { state.nameB = e.target.value; refresh(); });
+
+  // downloads
+  $('#downloadBtn').addEventListener('click', () => {
+    download(state.unlocked ? PRINT_SCALE : PREVIEW_SCALE, !state.unlocked,
+      state.unlocked ? 'longthread-print' : 'longthread-preview');
+  });
+
+  // buy
+  $('#buyBtn').addEventListener('click', () => {
+    if (!configured()) {
+      $('#keyNote').textContent = 'Checkout is not switched on yet on this copy of the site.';
+      $('#keyNote').hidden = false;
+      return;
+    }
+    window.open(CONFIG.gumroadUrl, '_blank', 'noopener');
+    $('#keyRow').hidden = false;
+    $('#key').focus();
+  });
+
+  $('#keyBtn').addEventListener('click', async () => {
+    const note = $('#keyNote');
+    const key = $('#key').value;
+    if (!key.trim()) return;
+    $('#keyBtn').disabled = true;
+    $('#keyBtn').textContent = 'Checking…';
+    const r = await verifyKey(key);
+    $('#keyBtn').disabled = false;
+    $('#keyBtn').textContent = 'Unlock';
+    if (r.ok) {
+      state.unlocked = true;
+      note.hidden = true;
+      $('#keyRow').hidden = true;
+      $('#buyRow').hidden = true;
+      $('#downloadBtn').textContent = 'Download print file · 2480 × 3508';
+      refresh();
+    } else {
+      note.textContent = r.message;
+      note.hidden = false;
+    }
+  });
+
+  $('#startOver').addEventListener('click', () => {
+    state.analysis = null;
+    input.value = '';
+    setStage('idle');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  $$('.retry').forEach((b) => b.addEventListener('click', () => setStage('idle')));
+
+  // page theme toggle
+  const root = document.documentElement;
+  $('#themeToggle').addEventListener('click', () => {
+    const now = root.getAttribute('data-theme')
+      || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    root.setAttribute('data-theme', now === 'dark' ? 'light' : 'dark');
+    try { localStorage.setItem('lt-theme', root.getAttribute('data-theme')); } catch {}
+  });
+  try {
+    const saved = localStorage.getItem('lt-theme');
+    if (saved) root.setAttribute('data-theme', saved);
+  } catch {}
+
+  // The whole engine is deliberately reachable from the console. Nothing here
+  // is a secret — the page is auditable by design, and the tests drive it.
+  window.LT = { parseChat, analyze, drawPoster, THEMES, demoText, CONFIG };
+
+  // exposed for the end-to-end test: renders at true print resolution
+  window.__renderPrint = async () => {
+    const c = document.createElement('canvas');
+    renderTo(c, PRINT_SCALE, false);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const ctx = c.getContext('2d');
+    const mid = ctx.getImageData(Math.floor(c.width / 2), Math.floor(c.height * 0.42), 1, 1).data;
+    return { w: c.width, h: c.height, bytes: blob ? blob.size : 0, mid: [...mid].slice(0, 3) };
+  };
+
+  // sample poster on the landing page
+  drawSample();
+
+  setStage('idle');
+  if (CONFIG.price) $$('.price').forEach((el) => { el.textContent = CONFIG.price; });
+}
+
+async function drawSample() {
+  const c = $('#sample');
+  if (!c) return;
+  const a = analyze(parseChat(demoText()));
+  await fontsReady();
+  const S = 0.86;
+  c.width = 1000 * S; c.height = Math.round(1414.4 * S);
+  drawPoster(c.getContext('2d'), a, { theme: 'nightfall', scale: S, watermark: false, domain: CONFIG.domain });
+  $$('#sampleThemes .swatch').forEach((b) => b.addEventListener('click', () => {
+    $$('#sampleThemes .swatch').forEach((x) => x.classList.toggle('on', x === b));
+    drawPoster(c.getContext('2d'), a, { theme: b.dataset.theme, scale: S, watermark: false, domain: CONFIG.domain });
+  }));
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+</script>
+</body>
+</html>
