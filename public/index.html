@@ -1354,15 +1354,15 @@ async function extractFirstTxt(arrayBuffer) {
 /* ------------------------------------------------------------------ config */
 const CONFIG = {
   // Set these once the Gumroad product exists. See SETUP.md.
-  gumroadProductId: 'lmcvku',
-  gumroadUrl: 'https://gumroad.com/l/lmcvku',
+  gumroadProductIds: ['lmcvku', 'longthread'],
+  gumroadUrl: 'https://vegasventure.gumroad.com/l/longthread',
   // Gumroad's verify endpoint. If it blocks browser calls, point this at the
   // Cloudflare Worker in SETUP.md instead.
   verifyUrl: 'https://api.gumroad.com/v2/licenses/verify',
   price: '$19',
   domain: 'longthread',
 };
-const configured = () => !CONFIG.gumroadProductId.startsWith('REPLACE');
+const configured = () => CONFIG.gumroadProductIds.some((id) => id && !id.startsWith('REPLACE'));
 
 /* ------------------------------------------------------------------- state */
 const state = {
@@ -1493,35 +1493,33 @@ async function verifyKey(key) {
   if (!configured()) {
     return { ok: false, message: 'Checkout is not switched on yet on this copy of the site.' };
   }
-  try {
-    const body = new URLSearchParams({
-      product_id: CONFIG.gumroadProductId,
-      product_permalink: CONFIG.gumroadProductId,
-      license_key: key.trim(),
-      increment_uses_count: 'false',
-    });
-    const res = await fetch(CONFIG.verifyUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body,
-    });
-    const json = await res.json();
-    if (json.success) return { ok: true };
-    return { ok: false, message: 'That key was not recognised. Check for a stray space, or paste it again from your Gumroad receipt.' };
-  } catch {
+  const trimmed = key.trim();
+  let reached = false;
+
+  for (const id of CONFIG.gumroadProductIds) {
+    try {
+      const res = await fetch(CONFIG.verifyUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          product_id: id,
+          product_permalink: id,
+          license_key: trimmed,
+          increment_uses_count: 'false',
+        }),
+      });
+      reached = true;
+      const json = await res.json().catch(() => ({}));
+      if (json && json.success) return { ok: true };
+    } catch {
+      // network failure for this attempt; try the next identifier
+    }
+  }
+
+  if (!reached) {
     return { ok: false, message: 'Could not reach the licence check just now. Try again in a moment.' };
   }
-}
-
-/* Saving works two ways: the published-preview host mediates saves through its
-   own capability, while the deployed site just uses a download link. Try the
-   first, fall back to the second, so one build covers both. */
-let downloadsApi;
-async function getDownloads() {
-  if (downloadsApi !== undefined) return downloadsApi;
-  try { downloadsApi = (await window.claude?.use?.('downloads')) ?? null; }
-  catch { downloadsApi = null; }
-  return downloadsApi;
+  return { ok: false, message: 'That key was not recognised. Check for a stray space, or paste it again from your Gumroad receipt.' };
 }
 
 async function download(scale, watermark, label) {
