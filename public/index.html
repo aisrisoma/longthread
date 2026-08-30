@@ -296,7 +296,7 @@ footer .wrap{display:flex; justify-content:space-between; gap:20px; flex-wrap:wr
             <p class="eyebrow">Your poster</p>
             <p class="note" id="groupNote" hidden></p>
             <p class="note" id="lockNote">The preview is watermarked. Unlocking removes it and renders the file at print resolution.</p>
-            <p class="note" id="unlockedNote" hidden>Unlocked. The download is now 2480 × 3508 — A4 at 300 dpi, and still sharp printed at A3.</p>
+            <p class="note" id="unlockedNote" hidden>Unlocked. You get the A4 print file at 2480 × 3508 in all three colourways, a print-ready PDF, a square version, a phone wallpaper and a printing guide — one ZIP. Your licence never expires and has no limit: come back and make one for any other chat.</p>
           </div>
 
           <div class="stack">
@@ -704,8 +704,20 @@ function analyze(parsed, opts = {}) {
   // poster is built from now, both as printed text and as extracted moments.
   const said = msgs.filter((m) => side(m.author) !== -1 && !m.media && !m.deleted && m.text.length > 1);
 
+  // The longest stretch when neither of you said anything, kept as a range so
+  // the poster's timeline can bracket the actual void rather than just name it.
+  let gapMs = 0, gapFrom = null, gapTo = null;
+  for (let i = 1; i < said.length; i++) {
+    const g = said[i].date - said[i - 1].date;
+    if (g > gapMs) { gapMs = g; gapFrom = said[i - 1].date; gapTo = said[i].date; }
+  }
+  const silence = gapMs >= 4 * DAY_MS && gapFrom
+    ? { days: Math.round(gapMs / DAY_MS), from: gapFrom, to: gapTo }
+    : null;
+
   return {
     said,
+    silence,
     moments: findMoments(said, side),
     people, principals, first, last, spanDays,
     daysTalked: daily.size,
@@ -894,30 +906,49 @@ const THEMES = {
 const DISPLAY = '"Instrument Serif", "Iowan Old Style", Georgia, serif';
 const MONO = '"IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace';
 
-const W = 1000, H = 1414.4, M = 82;
+/* The virtual page. Mutable because the pack renders the same material at
+   three different aspect ratios (A4, square, phone) and every helper below
+   measures against these. Rendering is synchronous, so a draw call sets the
+   geometry, draws, and puts it back before anything else can observe it. */
+let W = 1000, H = 1414.4, M = 82;
+const A4 = { W: 1000, H: 1414.4, M: 82 };
 
-/* One vertical budget for the whole poster, so sections cannot collide. */
+function withGeometry(g, fn) {
+  const prev = { W, H, M };
+  ({ W, H, M } = g);
+  try { return fn(); } finally { ({ W, H, M } = prev); }
+}
+
+/* One vertical budget for the whole poster, so sections cannot collide.
+
+   Composition, top to bottom: who -> the shape of it -> the feeling ->
+   the proof -> more feeling. The timeline is the image of the poster and gets
+   the largest single block; the field of tiny messages is a texture band
+   supporting it, not the subject. An earlier version inverted those two and
+   read as a grey slab above a vestigial sparkline. */
 const L = {
   keyline: 56,
-  eyebrow: 106, names: 172, range: 202, ruleTop: 226,
-  statLabel: 252, statValue: 282, ruleStats: 302,
+  eyebrow: 98, names: 162, range: 192, statLine: 218, ruleTop: 240,
 
-  microTop: 324, microBot: 858,
-  microCaption: 882, ruleMicro: 902,
+  chartLabels: 272, chartTop: 288, chartBot: 648, chartTicks: 668,
+  ruleChart: 694,
 
-  momentsTop: 936, momentsRowH: 152, momentCols: 2,
-  ruleMoments: 1248,
+  heroTop: 720, heroBot: 856, ruleHero: 878,
 
-  seismoTop: 1266, seismoBot: 1316,
-  ruleFoot: 1332, footText: 1358,
+  microTop: 906, microBot: 1126, microCaption: 1150, ruleMicro: 1172,
+
+  momentsTop: 1200, momentCols: 3,
+  ruleFoot: 1318, footText: 1346,
 };
 
 /* 3pt at 300dpi is about the smallest that stays readable on paper:
-   3pt = 12.5 device px = ~5.04 units at scale 2.48. */
+   3pt = 12.5 device px = ~5.04 units at scale 2.48. Leading is looser than
+   the type demands so the band reads as woven texture rather than a solid
+   block of grey — density was the thing that killed the last version. */
 const MICRO_SIZE = 5.1;
-const MICRO_LEAD = 6.3;
-const MICRO_COLS = 7;
-const MICRO_GUTTER = 9;
+const MICRO_LEAD = 6.9;
+const MICRO_COLS = 6;
+const MICRO_GUTTER = 11;
 
 /* ---------- helpers ---------- */
 
@@ -932,6 +963,13 @@ function tracked(ctx, text, x, y, spacing, align = 'left') {
     cx += ctx.measureText(c).width + spacing;
   }
   return total;
+}
+
+/* Width tracked() will occupy, without drawing anything. */
+function trackedWidth(ctx, text, spacing) {
+  let total = 0;
+  for (const c of [...text]) total += ctx.measureText(c).width + spacing;
+  return total - spacing;
 }
 
 function wrap(ctx, text, maxW, maxLines) {
@@ -988,6 +1026,10 @@ function eyebrow(ctx, t, text, x, y, align = 'left', color) {
 /* ---------- the poster ---------- */
 
 function drawPoster(ctx, a, opts) {
+  return withGeometry(A4, () => drawPosterInner(ctx, a, opts));
+}
+
+function drawPosterInner(ctx, a, opts) {
   const t = THEMES[opts.theme] || THEMES.nightfall;
   const S = opts.scale;
   const nameA = opts.nameA || a.people[0].name;
@@ -1005,11 +1047,12 @@ function drawPoster(ctx, a, opts) {
   ctx.strokeRect(L.keyline, L.keyline, W - L.keyline * 2, H - L.keyline * 2);
 
   header(ctx, t, a, nameA, nameB);
-  statStrip(ctx, t, a);
+  statLine(ctx, t, a);
+  timeline(ctx, t, a, nameA, nameB);
+  heroMoment(ctx, t, a, nameA, nameB);
   const shown = microField(ctx, t, a);
   microCaption(ctx, t, a, shown);
-  moments(ctx, t, a, nameA, nameB);
-  seismoBand(ctx, t, a, nameA, nameB);
+  smallMoments(ctx, t, a, nameA, nameB);
   footer(ctx, t, opts);
 
   if (opts.watermark) watermark(ctx, t);
@@ -1038,28 +1081,32 @@ function header(ctx, t, a, nameA, nameB) {
   ctx.fillStyle = t.b; ctx.fillText(nameB, x, L.names);
 
   eyebrow(ctx, t, `${fmtDate(a.first)}  —  ${fmtDate(a.last)}`, W / 2, L.range, 'center');
-  rule(ctx, t, L.ruleTop);
 }
 
-function statStrip(ctx, t, a) {
-  const cells = [
-    ['Messages', compact(a.total)],
-    ['Words', compact(a.totalWords)],
-    ['Days in touch', compact(a.daysTalked)],
-    ['Longest streak', `${a.streak}d`],
-    ['Balance', balance(a)],
+/* The numbers, as one line of small caps rather than five big figures in a
+   row. Five equal-weight statistics side by side is a dashboard, and a
+   dashboard printed on paper is still a dashboard. Items are dropped from the
+   tail until the line fits, so it never overruns the margins. */
+function statLine(ctx, t, a) {
+  const bits = [
+    `${fmtInt(a.total)} messages`,
+    `${compact(a.totalWords)} words`,
+    `${fmtInt(a.daysTalked)} days in touch`,
+    `longest streak ${a.streak} days`,
+    `busiest ${fmtDayKey(a.busiest.key)} · ${a.busiest.count}`,
+    balance(a),
   ];
-  const colW = (W - M * 2) / cells.length;
-  cells.forEach((c, i) => {
-    const cx = M + colW * i + colW / 2;
-    eyebrow(ctx, t, c[0], cx, L.statLabel, 'center');
-    ctx.fillStyle = t.ink;
-    const px = fitFont(ctx, c[1], colW - 16, 26, DISPLAY);
-    ctx.font = `400 ${px}px ${DISPLAY}`;
-    const w = ctx.measureText(c[1]).width;
-    ctx.fillText(c[1], cx - w / 2, L.statValue);
-  });
-  rule(ctx, t, L.ruleStats);
+  ctx.font = `500 9.5px ${MONO}`;
+  const SEP = '   ·   ';
+  const maxW = W - M * 2;
+  let text = bits.join(SEP).toUpperCase();
+  while (bits.length > 2 && trackedWidth(ctx, text, 2) > maxW) {
+    bits.pop();
+    text = bits.join(SEP).toUpperCase();
+  }
+  ctx.fillStyle = t.muted;
+  tracked(ctx, text, W / 2, L.statLine, 2, 'center');
+  rule(ctx, t, L.ruleTop);
 }
 
 /* The body of the poster: the conversation itself, one message per line, at
@@ -1110,73 +1157,235 @@ function microCaption(ctx, t, a, shown) {
   rule(ctx, t, L.ruleMicro);
 }
 
-/* Four things that were really said, found by the analyser. */
-function moments(ctx, t, a, nameA, nameB) {
+/* One moment given the room to land. Four equal quote cards in a grid made
+   every one of them furniture; a single line set large is the only part of
+   this poster anyone will read from across a room. Preference goes to the
+   message that broke the longest silence — on a real chat it is almost always
+   the one worth reading — and falls back to how it started. */
+function heroMoment(ctx, t, a, nameA, nameB) {
   const list = a.moments || [];
-  if (!list.length) return;
-  const gutter = 24;
-  const colW = (W - M * 2 - gutter) / L.momentCols;
+  const mo = list.find((m) => m.key === 'silence') || list[0];
+  if (!mo) return;
 
-  list.slice(0, 4).forEach((mo, i) => {
-    const col = i % L.momentCols;
-    const row = Math.floor(i / L.momentCols);
-    const x = M + col * (colW + gutter);
-    const y = L.momentsTop + row * L.momentsRowH;
+  const accent = mo.side === 0 ? t.a : t.b;
+  const who = mo.side === 0 ? nameA : nameB;
+  const quote = `“${mo.text.replace(/\s+/g, ' ').trim()}”`;
+  const maxW = W - M * 2 - 40;
+
+  eyebrow(ctx, t, mo.label, M, L.heroTop, 'left', accent);
+
+  // Shrink to fit rather than truncate. These are somebody's actual words and
+  // cutting one off mid-sentence to protect a layout is the wrong trade.
+  let px = 40, lines;
+  for (;;) {
+    ctx.font = `400 ${px}px ${DISPLAY}`;
+    lines = wrap(ctx, quote, maxW, 3);
+    const joined = lines.join(' ').length;
+    if (joined >= quote.length - 1 || px <= 22) break;
+    px -= 2;
+  }
+  // Hung from the label, not floated in the middle of its band — a one-line
+  // quote centred in a three-line box just looks lost.
+  const lead = px * 1.18;
+  const top = L.heroTop + 22;
+
+  ctx.fillStyle = t.ink;
+  ctx.font = `400 ${px}px ${DISPLAY}`;
+  lines.forEach((ln, k) => ctx.fillText(ln, M, top + lead * (k + 0.78)));
+
+  const bits = [who.toUpperCase()];
+  if (mo.date) bits.push(fmtDate(mo.date).toUpperCase());
+  if (mo.note) bits.push(mo.note.toUpperCase());
+  ctx.font = `500 9.5px ${MONO}`;
+  ctx.fillStyle = t.muted;
+  tracked(ctx, bits.join('  ·  '), M, L.heroBot, 2, 'left');
+
+  rule(ctx, t, L.ruleHero);
+}
+
+/* The rest of what the analyser found, in a row across the foot of the page —
+   smaller than the hero on purpose, so there is a first thing to read. */
+function smallMoments(ctx, t, a, nameA, nameB) {
+  const hero = (a.moments || []).find((m) => m.key === 'silence') || (a.moments || [])[0];
+  const list = (a.moments || []).filter((m) => m !== hero).slice(0, L.momentCols);
+  if (!list.length) return;
+
+  const gutter = 26;
+  const colW = (W - M * 2 - gutter * (L.momentCols - 1)) / L.momentCols;
+
+  list.forEach((mo, i) => {
+    const x = M + i * (colW + gutter);
+    const y = L.momentsTop;
     const accent = mo.side === 0 ? t.a : t.b;
     const who = mo.side === 0 ? nameA : nameB;
 
     eyebrow(ctx, t, mo.label, x, y, 'left', accent);
 
     ctx.fillStyle = t.ink;
-    ctx.font = `400 24px ${DISPLAY}`;
+    ctx.font = `400 18px ${DISPLAY}`;
     const lines = wrap(ctx, `“${mo.text.replace(/\s+/g, ' ').trim()}”`, colW, 3);
-    lines.forEach((ln, k) => ctx.fillText(ln, x, y + 32 + k * 28));
+    lines.forEach((ln, k) => ctx.fillText(ln, x, y + 26 + k * 21));
 
     const bits = [who.toUpperCase()];
     if (mo.date) bits.push(fmtDate(mo.date).toUpperCase());
-    if (mo.note) bits.push(mo.note.toUpperCase());
-    ctx.font = `500 9.5px ${MONO}`;
+    ctx.font = `500 8.5px ${MONO}`;
     ctx.fillStyle = t.muted;
-    tracked(ctx, bits.join('  ·  '), x, y + 32 + lines.length * 28 + 8, 2, 'left');
+    tracked(ctx, bits.join('  ·  '), x, y + 26 + 3 * 21 + 6, 1.8, 'left');
   });
-  rule(ctx, t, L.ruleMoments);
 }
 
-/* A slim mirrored daily band: one mark per day, one of you above the line and
-   the other below, so the shape of the whole thing anchors the foot of the page. */
-function seismoBand(ctx, t, a, nameA, nameB) {
-  const x0 = M, x1 = W - M, top = L.seismoTop, bot = L.seismoBot;
+/* THE IMAGE OF THE POSTER.
+
+   Every day of the conversation, left to right: one of you above the line,
+   the other below. Two series, so identity is the colour's job — and both are
+   direct-labelled, never colour alone. Days when nobody spoke are drawn as
+   nothing at all, which is the whole point: the silences have to be as visible
+   as the talking, because on most real chats the silences are the story.
+
+   One annotation only. The longest silence gets named inside the void it
+   made. Everything else that wants a callout goes in the stat line instead —
+   a chart with four labels pointing into it is a diagram, not an image. */
+function timeline(ctx, t, a, nameA, nameB) {
+  drawTimelineInto(ctx, t, a, nameA, nameB, {
+    top: L.chartTop, bot: L.chartBot, labels: L.chartLabels, ticks: L.chartTicks,
+  });
+  rule(ctx, t, L.ruleChart);
+}
+
+function drawTimelineInto(ctx, t, a, nameA, nameB, box) {
+  const x0 = M, x1 = W - M;
+  const top = box.top, bot = box.bot;
   const axis = Math.round((top + bot) / 2) + 0.5;
-  const half = (bot - top) / 2 - 2;
+  const half = (bot - top) / 2;
   const plotW = x1 - x0;
 
   const day0 = dayStartMs(a.first);
-  const nDays = a.spanDays;
-  const cols = Math.min(nDays, Math.max(24, Math.floor(plotW / 2.2)));
+  const nDays = Math.max(1, a.spanDays);
+  const atX = (ms) => x0 + Math.max(0, Math.min(1, ((ms - day0) / 86400000) / nDays)) * plotW;
+
+  // One column per day while that stays wide enough to survive printing;
+  // beyond that, days bucket together. Never fewer columns than 40, so a short
+  // chat still reads as a rhythm rather than three fat blocks.
+  const cols = Math.min(nDays, Math.max(40, Math.floor(plotW / 1.3)));
   const perCol = nDays / cols;
+  const colW = plotW / cols;
   const bucket = Array.from({ length: cols }, () => [0, 0]);
   for (const [k, v] of a.daily) {
-    const idx = Math.min(cols - 1, Math.floor(((new Date(k + 'T00:00:00').getTime() - day0) / 86400000) / perCol));
-    if (idx >= 0) { bucket[idx][0] += v[0]; bucket[idx][1] += v[1]; }
+    const idx = Math.floor(((new Date(k + 'T00:00:00').getTime() - day0) / 86400000) / perCol);
+    if (idx >= 0 && idx < cols) { bucket[idx][0] += v[0]; bucket[idx][1] += v[1]; }
   }
 
-  const all = bucket.flatMap((b) => [b[0], b[1]]).filter((v) => v > 0).sort((p, q) => p - q);
-  const cap = all.length ? all[Math.min(all.length - 1, Math.floor(all.length * 0.97))] : 1;
-  const sc = (v) => Math.min(1, v / cap) * half;
+  // Compressed power scale against the true maximum. A linear scale capped at a
+  // percentile clipped every busy day to the same flat top, which read as the
+  // chart hitting a ceiling; sqrt keeps the quiet days visible and lets the
+  // loudest day be the tallest thing on the page without anything clipping.
+  // There is no y-axis to misread here, so a compressed scale costs nothing.
+  let max = 1;
+  for (const b of bucket) { if (b[0] > max) max = b[0]; if (b[1] > max) max = b[1]; }
+  const sc = (v) => (v <= 0 ? 0 : Math.max(1.2, Math.pow(v / max, 0.68) * half));
 
-  const colW = plotW / cols;
-  const barW = Math.max(1, colW * 0.56);
+  // Time ticks, behind the data: years for a long chat, months for a short one.
+  if (box.ticks != null) {
+    const ticks = timeTicks(a.first, a.last, nDays);
+    ctx.strokeStyle = t.rule;
+    ctx.lineWidth = 1;
+    ctx.font = `500 9px ${MONO}`;
+    for (const tk of ticks) {
+      const x = Math.round(atX(tk.ms)) + 0.5;
+      if (x <= x0 + 2 || x >= x1 - 2) continue;
+      ctx.globalAlpha = 0.7;
+      ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bot); ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = t.muted;
+      tracked(ctx, tk.label, x, box.ticks, 1.6, 'center');
+    }
+  }
 
+  // The axis the two of you sit either side of.
+  ctx.strokeStyle = t.rule;
+  ctx.beginPath(); ctx.moveTo(x0, axis); ctx.lineTo(x1, axis); ctx.stroke();
+
+  // Below about 3 units a gap between bars is sub-pixel even at print scale
+  // and only produces shimmer, so dense charts run contiguous and read as one
+  // silhouette. Sparse ones keep the gap that separates the marks.
+  const barW = colW > 3 ? Math.min(colW * 0.7, 16) : colW;
   for (let i = 0; i < cols; i++) {
-    const x = x0 + i * colW;
+    const x = x0 + i * colW + (colW - barW) / 2;
     const [va, vb] = bucket[i];
-    if (va) { ctx.fillStyle = t.a; ctx.fillRect(x, axis - sc(va), barW, sc(va)); }
+    // A 1-unit gap either side of the axis keeps the two fills from fusing
+    // into a single mass where both of you talked on the same day.
+    if (va) { ctx.fillStyle = t.a; ctx.fillRect(x, axis - 1 - sc(va), barW, sc(va)); }
     if (vb) { ctx.fillStyle = t.b; ctx.fillRect(x, axis + 1, barW, sc(vb)); }
   }
 
+  ctx.font = `500 9.5px ${MONO}`;
+  ctx.fillStyle = t.a; tracked(ctx, nameA.toUpperCase(), x0, box.labels, 2, 'left');
+  ctx.fillStyle = t.b; tracked(ctx, nameB.toUpperCase(), x1, box.labels, 2, 'right');
+
+  silenceMark(ctx, t, a, atX, axis);
+}
+
+/* Names the longest silence inside the gap it left. Drawn only when the gap is
+   wide enough on the page to hold its own label — a caption pointing at
+   something too small to see is worse than no caption. */
+function silenceMark(ctx, t, a, atX, axis) {
+  const s = a.silence;
+  if (!s) return;
+  const xa = atX(s.from.getTime()), xb = atX(s.to.getTime());
+  const w = xb - xa;
+  if (w < 46) return;
+
+  const label = `${fmtInt(s.days)} days of nothing`.toUpperCase();
   ctx.font = `500 9px ${MONO}`;
-  ctx.fillStyle = t.a; tracked(ctx, nameA.toUpperCase(), x0, top - 8, 1.8, 'left');
-  ctx.fillStyle = t.b; tracked(ctx, nameB.toUpperCase(), x1, top - 8, 1.8, 'right');
+  const lw = trackedWidth(ctx, label, 2);
+  const mid = (xa + xb) / 2;
+  const y = axis - 26;
+
+  ctx.strokeStyle = t.muted;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(xa + 0.5, y - 5); ctx.lineTo(xa + 0.5, y + 5);       // left cap
+  ctx.moveTo(xb - 0.5, y - 5); ctx.lineTo(xb - 0.5, y + 5);       // right cap
+  if (w > lw + 24) {                                              // rule either side of the words
+    ctx.moveTo(xa, y); ctx.lineTo(mid - lw / 2 - 8, y);
+    ctx.moveTo(mid + lw / 2 + 8, y); ctx.lineTo(xb, y);
+  } else {
+    ctx.moveTo(xa, y); ctx.lineTo(xb, y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  if (w > lw + 24) {
+    ctx.fillStyle = t.muted;
+    tracked(ctx, label, mid, y + 3.2, 2, 'center');
+  }
+}
+
+/* Tick positions that stay legible whatever the span: years for multi-year
+   chats, quarters for one to two years, months for anything shorter. */
+function timeTicks(first, last, nDays) {
+  const out = [];
+  const y0 = first.getFullYear(), y1 = last.getFullYear();
+  if (nDays > 900) {
+    for (let y = y0 + 1; y <= y1; y++) out.push({ ms: new Date(y, 0, 1).getTime(), label: String(y) });
+  } else if (nDays > 150) {
+    const step = nDays > 420 ? 3 : nDays > 240 ? 2 : 1;
+    const d = new Date(first.getFullYear(), first.getMonth() + step, 1);
+    while (d <= last) {
+      out.push({ ms: d.getTime(), label: d.toLocaleDateString('en-GB', { month: 'short' }).toUpperCase() });
+      d.setMonth(d.getMonth() + step);
+    }
+  } else {
+    const d = new Date(first.getFullYear(), first.getMonth(), first.getDate());
+    const step = Math.max(1, Math.round(nDays / 7));
+    d.setDate(d.getDate() + step);
+    while (d <= last) {
+      out.push({ ms: d.getTime(), label: d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }).toUpperCase() });
+      d.setDate(d.getDate() + step);
+    }
+  }
+  return out.slice(0, 14);
 }
 
 function footer(ctx, t, opts) {
@@ -1185,6 +1394,117 @@ function footer(ctx, t, opts) {
   ctx.fillStyle = t.b; ctx.beginPath(); ctx.arc(M + 13, L.footText - 4, 4, 0, 7); ctx.fill();
   eyebrow(ctx, t, opts.domain || 'longthread', M + 30, L.footText);
   eyebrow(ctx, t, 'Every word on this page was really said', W - M, L.footText, 'right');
+}
+
+/* THE SHORT FORM — the square and the phone wallpaper.
+
+   Not a crop of the poster. A crop would slice the timeline in half and throw
+   away the silence, which is the one thing worth looking at. This is the same
+   material composed for the shape: who, the whole timeline, one line that was
+   really said, and nothing else. It has to survive being seen at thumbnail
+   size in somebody's feed, so everything that only works at arm's length —
+   the 3pt field, the small moments, the statistics — is left out.
+
+   `geom` is { W, H, M } in virtual units; the caller scales. */
+function drawShort(ctx, a, opts) {
+  const geom = opts.geom;
+  return withGeometry(geom, () => drawShortInner(ctx, a, opts));
+}
+
+function drawShortInner(ctx, a, opts) {
+  const t = THEMES[opts.theme] || THEMES.nightfall;
+  const nameA = opts.nameA || a.people[0].name;
+  const nameB = opts.nameB || a.people[1].name;
+  const tall = H / W > 1.6;
+
+  ctx.save();
+  ctx.scale(opts.scale, opts.scale);
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = t.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  const key = Math.round(M * 0.62);
+  ctx.strokeStyle = t.rule;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(key, key, W - key * 2, H - key * 2);
+
+  // Vertical budget, proportional so both aspect ratios stay balanced.
+  // The phone version deliberately clears its bottom quarter: that is where a
+  // home screen puts its icons, and anything printed there is covered up.
+  const topPad = tall ? H * 0.13 : H * 0.13;
+  const S = {
+    eyebrow: topPad,
+    names: topPad + 64,
+    range: topPad + 96,
+    chartLabels: tall ? H * 0.29 : H * 0.36,
+    chartTop: tall ? H * 0.31 : H * 0.38,
+    chartBot: tall ? H * 0.56 : H * 0.62,
+    heroTop: tall ? H * 0.63 : H * 0.72,
+    foot: H - key - 22,
+  };
+
+  eyebrow(ctx, t, 'Everything that was said between', W / 2, S.eyebrow, 'center');
+
+  // Names, shrunk to fit the narrower page.
+  const gap = 15;
+  let px = tall ? 54 : 58;
+  ctx.font = `400 ${px}px ${DISPLAY}`;
+  let wA = ctx.measureText(nameA).width, wAmp = ctx.measureText('&').width, wB = ctx.measureText(nameB).width;
+  let total = wA + wB + wAmp + gap * 2;
+  const maxW = W - M * 2;
+  if (total > maxW) {
+    px = Math.floor(px * (maxW / total));
+    ctx.font = `400 ${px}px ${DISPLAY}`;
+    wA = ctx.measureText(nameA).width; wAmp = ctx.measureText('&').width; wB = ctx.measureText(nameB).width;
+    total = wA + wB + wAmp + gap * 2;
+  }
+  let x = (W - total) / 2;
+  ctx.fillStyle = t.a; ctx.fillText(nameA, x, S.names); x += wA + gap;
+  ctx.fillStyle = t.muted; ctx.fillText('&', x, S.names); x += wAmp + gap;
+  ctx.fillStyle = t.b; ctx.fillText(nameB, x, S.names);
+
+  eyebrow(ctx, t, `${fmtInt(a.total)} messages  ·  ${fmtInt(a.daysTalked)} days in touch`,
+          W / 2, S.range, 'center');
+
+  drawTimelineInto(ctx, t, a, nameA, nameB, {
+    top: S.chartTop, bot: S.chartBot, labels: S.chartLabels, ticks: null,
+  });
+
+  // One line that was really said.
+  const list = a.moments || [];
+  const mo = list.find((m) => m.key === 'silence') || list[0];
+  if (mo) {
+    const accent = mo.side === 0 ? t.a : t.b;
+    const who = mo.side === 0 ? nameA : nameB;
+    eyebrow(ctx, t, mo.label, M, S.heroTop, 'left', accent);
+
+    let qpx = tall ? 40 : 36;
+    const quote = `“${mo.text.replace(/\s+/g, ' ').trim()}”`;
+    let lines;
+    for (;;) {
+      ctx.font = `400 ${qpx}px ${DISPLAY}`;
+      lines = wrap(ctx, quote, W - M * 2, 4);
+      if (lines.join(' ').length >= quote.length - 1 || qpx <= 20) break;
+      qpx -= 2;
+    }
+    const lead = qpx * 1.18;
+    ctx.fillStyle = t.ink;
+    lines.forEach((ln, k) => ctx.fillText(ln, M, S.heroTop + 24 + lead * (k + 0.78)));
+
+    ctx.font = `500 9.5px ${MONO}`;
+    ctx.fillStyle = t.muted;
+    const bits = [who.toUpperCase()];
+    if (mo.date) bits.push(fmtDate(mo.date).toUpperCase());
+    tracked(ctx, bits.join('  ·  '), M, S.heroTop + 24 + lead * lines.length + 26, 2, 'left');
+  }
+
+  ctx.fillStyle = t.a; ctx.beginPath(); ctx.arc(M + 4, S.foot - 4, 4, 0, 7); ctx.fill();
+  ctx.fillStyle = t.b; ctx.beginPath(); ctx.arc(M + 13, S.foot - 4, 4, 0, 7); ctx.fill();
+  eyebrow(ctx, t, opts.domain || 'longthread', M + 30, S.foot);
+  eyebrow(ctx, t, 'Really said', W - M, S.foot, 'right');
+
+  if (opts.watermark) watermark(ctx, t);
+  ctx.restore();
 }
 
 function watermark(ctx, t) {
@@ -1207,6 +1527,7 @@ function watermark(ctx, t) {
 const dayStartMs = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 const fmtDate = (d) => d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 const fmtInt = (n) => n.toLocaleString('en-US');
+const fmtDayKey = (k) => new Date(k + 'T00:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
 
 function compact(n) {
   if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
@@ -1359,9 +1680,233 @@ async function extractFirstTxt(arrayBuffer) {
   return new TextDecoder().decode(await new Response(stream).arrayBuffer());
 }
 
+/* ---- pack.js ---- */
+/* Longthread — the download pack.
+
+   Builds every file a buyer gets, in the browser, with no dependencies and no
+   server. Two formats are written by hand here because pulling in a ZIP
+   library and a PDF library for this would double the size of the page and
+   both are a few dozen lines when you only need one feature each:
+
+     · ZIP  — deflate via CompressionStream('deflate-raw'), CRC-32 by table.
+     · PDF  — a single full-bleed image on one A4 page, /FlateDecode raw RGB
+              so the 3pt type stays crisp. JPEG would have been fewer lines
+              and would have smeared exactly the part of the poster that is
+              the point.
+
+   Everything is generated one canvas at a time and released immediately: a
+   2480 x 3508 canvas is 35MB of backing store and phones will drop the tab if
+   several are alive at once.
+*/
+
+/* ------------------------------------------------------------------- CRC-32 */
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(bytes) {
+  let c = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+
+async function deflateRaw(bytes) {
+  // Every browser that can render this poster has CompressionStream; the
+  // fallback stores the entry uncompressed rather than failing the download.
+  if (typeof CompressionStream !== 'function') return null;
+  try {
+    const cs = new CompressionStream('deflate-raw');
+    const stream = new Blob([bytes]).stream().pipeThrough(cs);
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    return null;
+  }
+}
+
+/* ---------------------------------------------------------------------- ZIP */
+
+const enc = new TextEncoder();
+
+function u16(n) { return [n & 0xFF, (n >>> 8) & 0xFF]; }
+function u32(n) { return [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF]; }
+
+/* files: [{ name, data: Uint8Array }] -> Blob. Store or deflate per entry,
+   whichever is smaller, which matters because PNGs are already compressed and
+   deflating them again only adds bytes. */
+async function makeZip(files) {
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+
+  for (const f of files) {
+    const nameBytes = enc.encode(f.name);
+    const raw = f.data;
+    const crc = crc32(raw);
+    const packed = await deflateRaw(raw);
+    const useDeflate = packed && packed.length < raw.length;
+    const body = useDeflate ? packed : raw;
+    const method = useDeflate ? 8 : 0;
+
+    const local = new Uint8Array([
+      ...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(method),
+      ...u16(0), ...u16(0),                       // no meaningful mtime
+      ...u32(crc), ...u32(body.length), ...u32(raw.length),
+      ...u16(nameBytes.length), ...u16(0), ...nameBytes,
+    ]);
+    chunks.push(local, body);
+
+    central.push(new Uint8Array([
+      ...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(method),
+      ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(body.length), ...u32(raw.length),
+      ...u16(nameBytes.length), ...u16(0), ...u16(0),
+      ...u16(0), ...u16(0), ...u32(0), ...u32(offset),
+      ...nameBytes,
+    ]));
+    offset += local.length + body.length;
+  }
+
+  const dirSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array([
+    ...u32(0x06054b50), ...u16(0), ...u16(0),
+    ...u16(files.length), ...u16(files.length),
+    ...u32(dirSize), ...u32(offset), ...u16(0),
+  ]);
+
+  return new Blob([...chunks, ...central, end], { type: 'application/zip' });
+}
+
+/* ---------------------------------------------------------------------- PDF */
+
+function pdfEscape(s) { return s.replace(/([\\()])/g, '\\$1'); }
+
+/* One page, one image, no text objects — the poster is already typeset. Page
+   box is set from the pixel size at 300dpi so the PDF is physically A4 and a
+   print shop gets the dimensions it expects without scaling anything. */
+async function makePdf(canvas, meta = {}) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h).data;
+
+  // RGBA -> RGB. The poster has no transparency; carrying an alpha channel
+  // into the PDF would mean an /SMask and a second compressed stream.
+  const rgb = new Uint8Array(w * h * 3);
+  for (let i = 0, j = 0; i < img.length; i += 4) {
+    rgb[j++] = img[i]; rgb[j++] = img[i + 1]; rgb[j++] = img[i + 2];
+  }
+
+  let stream = null;
+  if (typeof CompressionStream === 'function') {
+    try {
+      const cs = new CompressionStream('deflate');     // zlib wrapper: /FlateDecode
+      stream = new Uint8Array(await new Response(new Blob([rgb]).stream().pipeThrough(cs)).arrayBuffer());
+    } catch { stream = null; }
+  }
+  const useFlate = !!stream;
+  const data = stream || rgb;
+
+  const PT_PER_PX = 72 / 300;                 // rendered at 300dpi
+  const pw = +(w * PT_PER_PX).toFixed(2);
+  const ph = +(h * PT_PER_PX).toFixed(2);
+
+  const objs = [];
+  objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
+  objs[2] = '<< /Type /Pages /Kids [3 0 R] /Count 1 >>';
+  objs[3] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pw} ${ph}] `
+          + `/Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>`;
+  const content = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`;
+  objs[4] = `<< /Length ${content.length} >>\nstream\n${content}\nendstream`;
+  objs[5] = `<< /Type /XObject /Subtype /Image /Width ${w} /Height ${h} `
+          + `/ColorSpace /DeviceRGB /BitsPerComponent 8 `
+          + (useFlate ? '/Filter /FlateDecode ' : '')
+          + `/Length ${data.length} >>`;
+  objs[6] = `<< /Title (${pdfEscape(meta.title || 'Longthread')}) `
+          + `/Creator (${pdfEscape(meta.creator || 'Longthread')}) /Producer (Longthread) >>`;
+
+  // Assemble, tracking byte offsets for the xref table.
+  const parts = [];
+  let len = 0;
+  const push = (bytesOrStr) => {
+    const b = typeof bytesOrStr === 'string' ? enc.encode(bytesOrStr) : bytesOrStr;
+    parts.push(b); len += b.length;
+    return b.length;
+  };
+
+  push('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n');
+  const offsets = [];
+  for (let i = 1; i <= 6; i++) {
+    offsets[i] = len;
+    push(`${i} 0 obj\n${objs[i]}\n`);
+    if (i === 5) { push('stream\n'); push(data); push('\nendstream\n'); }
+    push('endobj\n');
+  }
+
+  const xrefAt = len;
+  let xref = `xref\n0 7\n0000000000 65535 f \n`;
+  for (let i = 1; i <= 6; i++) xref += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  push(xref);
+  push(`trailer\n<< /Size 7 /Root 1 0 R /Info 6 0 R >>\nstartxref\n${xrefAt}\n%%EOF\n`);
+
+  return new Blob(parts, { type: 'application/pdf' });
+}
+
+/* ------------------------------------------------------------------- guide */
+
+function printingGuide(names, domain) {
+  return [
+    `LONGTHREAD — ${names}`,
+    ``,
+    `WHAT IS IN HERE`,
+    `  a4-print-*.png    The poster at 2480 x 3508 pixels — A4 at 300dpi, in`,
+    `                    three colourways. Any of them will also print sharp`,
+    `                    at A3; the file is the same, the paper is bigger.`,
+    `  a4-print.pdf      The same poster as a true A4 PDF. Give a print shop`,
+    `                    this one — it already knows what size it is.`,
+    `  square.png        2048 x 2048, for posting.`,
+    `  phone.png         1290 x 2796, for a phone screen.`,
+    ``,
+    `GETTING IT PRINTED`,
+    `  Ask for A3 on matte or uncoated paper, 200gsm or heavier. Matte suits`,
+    `  this design better than gloss — the type is small and gloss throws`,
+    `  reflections across it. Any high-street print shop or online service can`,
+    `  do it; you do not need a specialist.`,
+    ``,
+    `  If they ask about bleed, say none is needed — the border is part of the`,
+    `  design and the poster is meant to be trimmed to size.`,
+    ``,
+    `  Printing it yourself on A4 at home works too. Choose "actual size" or`,
+    `  100% rather than "fit to page", or you will lose the border.`,
+    ``,
+    `YOUR LICENCE`,
+    `  One licence, unlimited posters, no expiry. Make one for every`,
+    `  conversation you have — a partner, a best friend, a family group, the`,
+    `  chat that has been going since school. The key is remembered in your`,
+    `  browser, so most of the time you will not have to paste it again.`,
+    ``,
+    `  Keep the key from your receipt somewhere safe anyway. It is the only`,
+    `  thing that proves the licence is yours, and there is no account to log`,
+    `  in to — this site has never stored anything about you.`,
+    ``,
+    `PRIVACY`,
+    `  Your chat was read inside your own browser tab and never sent anywhere.`,
+    `  There is no server behind ${domain} to have sent it to.`,
+    ``,
+    `${domain}`,
+    ``,
+  ].join('\n');
+}
+
 /* ---- app.js ---- */
 /* Longthread — page behaviour. Everything here runs in the visitor's tab;
    no chat data is ever sent anywhere. */
+
 
 
 
@@ -1431,11 +1976,11 @@ async function fontsReady() {
   } catch { /* fallback stacks will be used */ }
 }
 
-function renderTo(canvas, scale, watermark) {
+function renderTo(canvas, scale, watermark, themeKey) {
   canvas.width = Math.round(1000 * scale);
   canvas.height = Math.round(1414.4 * scale);
   drawPoster(canvas.getContext('2d'), state.analysis, {
-    theme: state.theme,
+    theme: themeKey || state.theme,
     scale,
     watermark,
     nameA: state.nameA,
@@ -1452,7 +1997,7 @@ function refresh() {
   $('#unlockedNote').hidden = !state.unlocked;
   $('#buyRow').hidden = state.unlocked;
   $('#downloadBtn').textContent = state.unlocked
-    ? 'Download print file · 2480 × 3508'
+    ? 'Download the pack · 7 files'
     : 'Download watermarked preview';
 }
 
@@ -1565,6 +2110,135 @@ async function verifyKey(key) {
   return { ok: false, message: 'That key was not recognised. Check for a stray space, or paste it again from your Gumroad receipt.' };
 }
 
+/* The Artifact runtime exposes a downloads capability; an ordinary web page
+   does not, and returning null there makes download() fall through to a plain
+   <a download> click, which is what the live site uses.
+
+   NB: this function was CALLED but never DEFINED, so every download on the
+   live site threw a ReferenceError — which the bare catch below swallowed and
+   reported to the visitor as a canvas-size problem. Preview and paid print
+   file alike. Do not remove it. */
+async function getDownloads() {
+  try {
+    const api = window.claude && window.claude.downloads;
+    if (api && typeof api.save === 'function') return api;
+  } catch { /* not running inside an artifact */ }
+  return null;
+}
+
+/* Everything a paying buyer gets, built here in the tab. Rendered strictly one
+   canvas at a time and released between files — a 2480 x 3508 canvas holds
+   ~35MB of backing store and phones drop the tab if several are alive at once. */
+const PACK_FORMATS = { square: { W: 1000, H: 1000, M: 76, px: 2048 }, phone: { W: 1000, H: 2167.44, M: 76, px: 1290 } };
+
+async function renderPack(onStep) {
+  const files = [];
+  const themeKeys = Object.keys(THEMES);
+  const stem = `${slug(state.nameA)}-and-${slug(state.nameB)}`;
+  let step = 0;
+  const total = themeKeys.length + 3;
+  const tick = (what) => onStep && onStep(++step, total, what);
+
+  const shoot = async (draw, w, h) => {
+    let c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    draw(c);
+    const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    c.width = c.height = 0;                    // release the backing store now
+    c = null;
+    return bytes;
+  };
+
+  // The A4 print file, in every colourway.
+  for (const key of themeKeys) {
+    tick(`${THEMES[key].label} print file`);
+    files.push({
+      name: `${stem}-a4-print-${key}.png`,
+      data: await shoot((c) => renderTo(c, PRINT_SCALE, false, key), 2480, 3508),
+    });
+  }
+
+  // The PDF, in the colourway they chose. One is enough: it exists so a print
+  // shop has something with real dimensions on it, not as another colourway.
+  tick('print-ready PDF');
+  {
+    let c = document.createElement('canvas');
+    c.width = 2480; c.height = 3508;
+    renderTo(c, PRINT_SCALE, false, state.theme);
+    const pdf = await makePdf(c, { title: `Longthread — ${state.nameA} & ${state.nameB}` });
+    files.push({ name: `${stem}-a4-print.pdf`, data: new Uint8Array(await pdf.arrayBuffer()) });
+    c.width = c.height = 0; c = null;
+  }
+
+  tick('square version');
+  {
+    const g = PACK_FORMATS.square;
+    files.push({
+      name: `${stem}-square.png`,
+      data: await shoot((c) => drawShort(c.getContext('2d'), state.analysis, {
+        geom: g, scale: g.px / g.W, theme: state.theme, watermark: false,
+        nameA: state.nameA, nameB: state.nameB, domain: CONFIG.domain,
+      }), g.px, Math.round(g.px * (g.H / g.W))),
+    });
+  }
+
+  tick('phone wallpaper');
+  {
+    const g = PACK_FORMATS.phone;
+    files.push({
+      name: `${stem}-phone.png`,
+      data: await shoot((c) => drawShort(c.getContext('2d'), state.analysis, {
+        geom: g, scale: g.px / g.W, theme: state.theme, watermark: false,
+        nameA: state.nameA, nameB: state.nameB, domain: CONFIG.domain,
+      }), g.px, Math.round(g.px * (g.H / g.W))),
+    });
+  }
+
+  files.push({
+    name: 'how-to-print-this.txt',
+    data: new TextEncoder().encode(printingGuide(`${state.nameA} & ${state.nameB}`, CONFIG.domain || 'longthread')),
+  });
+
+  return { files, stem };
+}
+
+async function downloadPack() {
+  const btn = $('#downloadBtn');
+  const note = $('#downloadNote');
+  const prev = btn.textContent;
+  btn.disabled = true;
+  note.hidden = false;
+
+  try {
+    const { files, stem } = await renderPack((i, n, what) => {
+      btn.textContent = `Building ${i} of ${n}…`;
+      note.textContent = `Rendering the ${what}. Everything is being made here in your browser, which is why it takes a moment.`;
+    });
+    btn.textContent = 'Packing…';
+    const zip = await makeZip(files);
+    saveBlob(zip, `${stem}-longthread.zip`);
+    note.textContent = `${files.length} files, ${(zip.size / 1048576).toFixed(1)} MB. Your licence has no expiry and no limit — come back and make one for any other chat.`;
+  } catch (err) {
+    console.error('Longthread: pack failed', err);
+    note.textContent = 'Something went wrong building the pack. Reload and try again — if it happens twice, reply to your receipt email and the files will be sent to you directly.';
+  } finally {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }
+}
+
+function saveBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
 async function download(scale, watermark, label) {
   const btn = $('#downloadBtn');
   const note = $('#downloadNote');
@@ -1578,7 +2252,10 @@ async function download(scale, watermark, label) {
     const c = document.createElement('canvas');
     renderTo(c, scale, watermark);
     const blob = await new Promise((res) => c.toBlob(res, 'image/png'));
-    if (!blob) throw new Error('render');
+    // A null blob is the one failure that genuinely IS the canvas being too
+    // big for this device. Anything else is a bug and must not be dressed up
+    // as one — telling someone with a short chat to "try a computer" is a lie.
+    if (!blob) { const e = new Error('canvas too large'); e.tooLarge = true; throw e; }
     const filename = `${slug(state.nameA)}-and-${slug(state.nameB)}-${label}.png`;
 
     const dl = await getDownloads();
@@ -1602,8 +2279,11 @@ async function download(scale, watermark, label) {
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 4000);
     }
-  } catch {
-    note.textContent = 'The poster could not be rendered at that size on this device. Try a computer, or a smaller chat.';
+  } catch (err) {
+    console.error('Longthread: download failed', err);
+    note.textContent = err && err.tooLarge
+      ? 'The poster could not be rendered at that size on this device. Try a computer, or a smaller chat.'
+      : 'Something went wrong building that file. Reload the page and try again — and if it happens twice, reply to your receipt email and the file will be sent to you directly.';
     note.hidden = false;
   } finally {
     btn.textContent = prev;
@@ -1668,8 +2348,8 @@ function init() {
 
   // downloads
   $('#downloadBtn').addEventListener('click', () => {
-    download(state.unlocked ? PRINT_SCALE : PREVIEW_SCALE, !state.unlocked,
-      state.unlocked ? 'longthread-print' : 'longthread-preview');
+    if (state.unlocked) downloadPack();
+    else download(PREVIEW_SCALE, true, 'longthread-preview');
   });
 
   // buy
